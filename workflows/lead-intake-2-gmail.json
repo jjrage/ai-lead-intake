@@ -1,0 +1,348 @@
+{
+  "id": "LeadIntakeGmail1",
+  "name": "Lead Intake · 2 Gmail",
+  "description": "Polls the agency inbox and hands each new email to processing.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Agency inbox (Gmail)\nChecks the inbox every minute. Each new email is processed by **3 Process lead** one at a time, then tagged with the Gmail label **Lead Intake** (created on first use). Repeats are stopped by the lead log in Postgres, keyed by the Gmail message id.",
+        "height": 180,
+        "width": 900,
+        "color": 6
+      },
+      "id": "ecad96be-e700-45cb-a315-5b448d105ddd",
+      "name": "Note: gmail",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "in:inbox -from:me",
+          "readStatus": "both"
+        },
+        "options": {}
+      },
+      "id": "d1319c65-4aa3-468c-a8d8-10c0429f2bc0",
+      "name": "New email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One inbound email becomes the lead record the processing workflow expects. Keyed by the Gmail\n// message id, so the same email is never processed twice.\nreturn $input.all().map((item) => {\n  const m = item.json;\n  const from = m.from?.value?.[0] ?? {};\n  const address = String(from.address ?? '').toLowerCase();\n  const text = String(m.text ?? '').trim() || String(m.html ?? '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n  const received = m.date ? new Date(m.date).toISOString() : new Date().toISOString();\n  const input = { channel: 'email', received_at: received, from: from.name ? `${from.name} <${address}>` : address, subject: m.subject ?? '', body: text };\n  return { json: { source: 'email', raw_key: `gmail|${m.id}`, received_at: received, input, reply_to: address, thread_id: m.threadId, message_id: m.id } };\n});\n"
+      },
+      "id": "7816e7db-7659-486a-a5a2-5a011f4de4ab",
+      "name": "Normalize email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "6e549769-171a-4c37-a80a-78ad4b0010a5",
+      "name": "Each email",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadIntakeProc01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "fecb68b5-9454-42d0-a4ba-9334db0b3b83",
+      "name": "Process lead",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        100
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "operation": "getAll",
+        "returnAll": true
+      },
+      "id": "0ae78e65-1946-423d-a9c8-e8124831eece",
+      "name": "Get labels",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const label = $input.all().map((i) => i.json).find((l) => l.name === 'Lead Intake');\nreturn [{ json: { label_id: label?.id ?? null } }];\n"
+      },
+      "id": "26742471-4256-46ec-ad7b-7eee04d0f320",
+      "name": "Find Lead Intake label",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9d7935b7-393e-d2ba-f7fe-079ec8791daa",
+              "leftValue": "={{ $json.label_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9dd0b801-8edd-4ced-a183-fabf7fba69fd",
+      "name": "Label exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "operation": "create",
+        "name": "Lead Intake",
+        "options": {}
+      },
+      "id": "0fa8d160-32a7-4a08-a96a-e981e1189f75",
+      "name": "Create label",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1540,
+        120
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $('Each email').first().json.message_id }}",
+        "labelIds": "={{ [$json.label_id ?? $json.id] }}"
+      },
+      "id": "3e8977c5-90a2-4816-a9d5-0a5e6a957f61",
+      "name": "Tag email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1760,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New email": {
+      "main": [
+        [
+          {
+            "node": "Normalize email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize email": {
+      "main": [
+        [
+          {
+            "node": "Each email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Each email": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Process lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process lead": {
+      "main": [
+        [
+          {
+            "node": "Get labels",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Each email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get labels": {
+      "main": [
+        [
+          {
+            "node": "Find Lead Intake label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Lead Intake label": {
+      "main": [
+        [
+          {
+            "node": "Label exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label exists?": {
+      "main": [
+        [
+          {
+            "node": "Tag email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create label": {
+      "main": [
+        [
+          {
+            "node": "Tag email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag email": {
+      "main": [
+        [
+          {
+            "node": "Each email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadIntakeErrs01",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

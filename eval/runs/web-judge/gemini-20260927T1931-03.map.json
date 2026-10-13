@@ -1,0 +1,212 @@
+[
+  {
+    "caseId": "13-reply-with-quoted-thread",
+    "drafts": [
+      {
+        "draftId": "L1-D1",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D2",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D3",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D4",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D5",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D6",
+        "variant": "v2",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "15-app-out-of-scope",
+    "drafts": [
+      {
+        "draftId": "L2-D1",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D2",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D3",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D4",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D5",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D6",
+        "variant": "baseline",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "16-movers-ru",
+    "drafts": [
+      {
+        "draftId": "L3-D1",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D2",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D3",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D4",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D5",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D6",
+        "variant": "baseline",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "17-landscaping-spanglish",
+    "drafts": [
+      {
+        "draftId": "L4-D1",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D2",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D3",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D4",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D5",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D6",
+        "variant": "baseline",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "18-lead-with-injection",
+    "drafts": [
+      {
+        "draftId": "L5-D1",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D2",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D3",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D4",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D5",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D6",
+        "variant": "v1",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "21-partnership-that-is-a-lead",
+    "drafts": [
+      {
+        "draftId": "L6-D1",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D2",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D3",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D4",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D5",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D6",
+        "variant": "v2",
+        "rep": 0
+      }
+    ]
+  }
+]

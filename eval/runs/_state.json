@@ -1,0 +1,85 @@
+{
+  "metrics": [
+    {
+      "id": "all_fields",
+      "label": "All fields",
+      "kind": "binary"
+    },
+    {
+      "id": "category",
+      "label": "Category",
+      "kind": "binary"
+    },
+    {
+      "id": "services",
+      "label": "Services",
+      "kind": "binary"
+    },
+    {
+      "id": "urgency",
+      "label": "Urgency",
+      "kind": "binary"
+    },
+    {
+      "id": "budget",
+      "label": "Budget",
+      "kind": "binary"
+    },
+    {
+      "id": "contact",
+      "label": "Contact",
+      "kind": "binary"
+    },
+    {
+      "id": "language",
+      "label": "Language",
+      "kind": "binary"
+    },
+    {
+      "id": "needs_review",
+      "label": "Needs review",
+      "kind": "binary"
+    },
+    {
+      "id": "reply",
+      "label": "Reply present",
+      "kind": "binary"
+    },
+    {
+      "id": "draft_format",
+      "label": "Draft format",
+      "kind": "binary"
+    }
+  ],
+  "perf_fields": [
+    {
+      "id": "cost_usd",
+      "label": "Cost",
+      "unit": "$"
+    },
+    {
+      "id": "latency_s",
+      "label": "Latency",
+      "unit": "s"
+    },
+    {
+      "id": "in_tokens",
+      "label": "In tokens"
+    },
+    {
+      "id": "out_tokens",
+      "label": "Out tokens"
+    }
+  ],
+  "harness_paths": [
+    "eval/lib/providers.mjs",
+    "eval/lib/grade.mjs",
+    "eval/lib/validate.mjs",
+    "eval/lib/lead.mjs",
+    "eval/models.json",
+    "eval/cases.json",
+    "prompts/lead-intake.system.md",
+    "prompts/lead-intake.schema.json"
+  ],
+  "harness_sha": "d4659615bbe22d092bf4b8a9bcccc723de03d0038678f4a1cd293280b6242240"
+}

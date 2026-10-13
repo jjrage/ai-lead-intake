@@ -1,0 +1,126 @@
+{
+  "id": "LeadIntakeForm01",
+  "name": "Lead Intake · 1 Web form",
+  "description": "Receives the website contact form and hands the lead to processing.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Website form\nThe demo page (`demo-form/`, http://localhost:8080) posts JSON here. The form gets an answer at once; the lead is processed in the background by **3 Process lead**.",
+        "height": 160,
+        "width": 700,
+        "color": 6
+      },
+      "id": "c7a7ec24-21dd-466a-a91d-5e7863251db5",
+      "name": "Note: form",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "onReceived",
+        "options": {
+          "allowedOrigins": "http://localhost:8080",
+          "responseData": "{\"status\":\"received\"}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "c9f90a62-3807-4ed5-aadf-b0bfa414967d",
+      "name": "Website form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "c6b1f1f0-2a8e-4d5a-9f3e-1a7d6c2b9e41"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One website form submission becomes the lead record the processing workflow expects.\n// The dedupe key covers who sent it and what they wrote, so a resubmitted form is recognised.\nconst out = [];\nfor (const item of $input.all()) {\n  const b = item.json.body ?? {};\n  const clean = (v) => (typeof v === 'string' ? v.trim() : '');\n  const sent = Date.parse(b.received_at);  // test submissions may carry their own timestamp\n  const input = {\n    channel: 'web_form',\n    received_at: Number.isNaN(sent) ? new Date().toISOString() : new Date(sent).toISOString(),\n    name: clean(b.name), email: clean(b.email).toLowerCase(), phone: clean(b.phone),\n    company: clean(b.company), message: clean(b.message),\n  };\n  if (!input.message || (!input.email && !input.phone)) continue;  // nothing to act on\n  const key = ['form', input.email, input.phone.replace(/\\D/g, ''), input.message.toLowerCase().replace(/\\s+/g, ' ')].join('|');\n  out.push({ json: { source: 'web_form', raw_key: key, received_at: input.received_at, input, reply_to: input.email || null, thread_id: null, message_id: null } });\n}\nreturn out;\n"
+      },
+      "id": "057ef4c7-12e2-4f0b-aa28-4003a4f1649d",
+      "name": "Normalize form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadIntakeProc01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "8b9dcea5-d084-4fe3-aa4f-5eaf3be03d96",
+      "name": "Process lead",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Website form": {
+      "main": [
+        [
+          {
+            "node": "Normalize form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize form": {
+      "main": [
+        [
+          {
+            "node": "Process lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadIntakeErrs01",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

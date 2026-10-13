@@ -1,0 +1,212 @@
+[
+  {
+    "caseId": "01-roofing-website-hot",
+    "drafts": [
+      {
+        "draftId": "L1-D1",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D2",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D3",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D4",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D5",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L1-D6",
+        "variant": "v3",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "02-dental-local-seo",
+    "drafts": [
+      {
+        "draftId": "L2-D1",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D2",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D3",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D4",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D5",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L2-D6",
+        "variant": "v3",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "03-ecommerce-ads-no-rush",
+    "drafts": [
+      {
+        "draftId": "L3-D1",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D2",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D3",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D4",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D5",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L3-D6",
+        "variant": "v4",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "04-restaurant-social-es",
+    "drafts": [
+      {
+        "draftId": "L4-D1",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D2",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D3",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D4",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D5",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L4-D6",
+        "variant": "v2",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "06-saas-linkedin-email",
+    "drafts": [
+      {
+        "draftId": "L5-D1",
+        "variant": "v4",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D2",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D3",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D4",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D5",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L5-D6",
+        "variant": "v5",
+        "rep": 0
+      }
+    ]
+  },
+  {
+    "caseId": "05-coffee-brand-site-pt",
+    "drafts": [
+      {
+        "draftId": "L6-D1",
+        "variant": "baseline",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D2",
+        "variant": "v3",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D3",
+        "variant": "v1",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D4",
+        "variant": "v5",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D5",
+        "variant": "v2",
+        "rep": 0
+      },
+      {
+        "draftId": "L6-D6",
+        "variant": "v4",
+        "rep": 0
+      }
+    ]
+  }
+]

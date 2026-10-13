@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "category",
+    "services",
+    "urgency",
+    "budget",
+    "contact",
+    "language",
+    "needs_review",
+    "review_reason",
+    "reply"
+  ],
+  "properties": {
+    "summary": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": ["sales_lead", "existing_client", "solicitation", "job_application", "spam", "other"]
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["website", "seo", "paid_ads", "social_media", "branding", "email_marketing", "other"]
+      }
+    },
+    "urgency": { "type": "string", "enum": ["high", "medium", "low", "unknown"] },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max", "currency", "period"],
+      "properties": {
+        "min": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+        "max": { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+        "currency": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "period": { "type": "string", "enum": ["one_time", "monthly", "unknown"] }
+      }
+    },
+    "contact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "email", "phone", "company"],
+      "properties": {
+        "name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "email": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "phone": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "company": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+      }
+    },
+    "language": { "type": "string" },
+    "needs_review": { "type": "boolean" },
+    "review_reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "reply": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subject", "body"],
+          "properties": {
+            "subject": { "type": "string" },
+            "body": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}

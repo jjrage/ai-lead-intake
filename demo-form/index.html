@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copperline Digital: Denver marketing agency</title>
+<style>
+  :root {
+    --bg: #f7f4ef; --ink: #1f1b16; --muted: #6a6158; --copper: #b4582b; --copper-dark: #8e4220;
+    --card: #ffffff; --line: #e6ded3; --ok: #1f7a4a; --err: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  header { max-width: 1080px; margin: 0 auto; padding: 20px 16px; display: flex; justify-content: space-between; align-items: center; }
+  .logo { font-weight: 700; letter-spacing: .02em; font-size: 18px; }
+  .logo span { color: var(--copper); }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 20px; font-size: 15px; }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: start; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; gap: 28px; } nav { display: none; } }
+  h1 { font-size: clamp(32px, 5vw, 46px); line-height: 1.1; margin: 24px 0 16px; letter-spacing: -.01em; }
+  .lead { font-size: 18px; color: var(--muted); max-width: 34em; }
+  .services { list-style: none; padding: 0; margin: 28px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+  .services li { padding-left: 18px; position: relative; }
+  .services li::before { content: ""; position: absolute; left: 0; top: .6em; width: 8px; height: 8px; border-radius: 2px; background: var(--copper); }
+  .proof { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 16px; }
+  form { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 28px; box-shadow: 0 10px 30px rgba(60, 40, 20, .06); }
+  form h2 { margin: 0 0 4px; font-size: 22px; }
+  form p.sub { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 480px) { .row { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  label .opt { font-weight: 400; color: var(--muted); }
+  input, textarea { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fffdfa; color: var(--ink); }
+  input:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--copper) 40%, transparent); border-color: var(--copper); }
+  textarea { min-height: 130px; resize: vertical; }
+  button { margin-top: 20px; width: 100%; padding: 13px; border: 0; border-radius: 8px; background: var(--copper); color: #fff; font-family: inherit; font-size: 16px; font-weight: 600; cursor: pointer; }
+  button:hover { background: var(--copper-dark); }
+  button:disabled { opacity: .6; cursor: progress; }
+  .status { margin-top: 14px; font-size: 14px; min-height: 1.4em; }
+  .status.ok { color: var(--ok); } .status.err { color: var(--err); }
+  footer { max-width: 1080px; margin: 0 auto; padding: 0 16px 32px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Copper<span>line</span> Digital</div>
+  <nav><a href="#">Work</a><a href="#">Services</a><a href="#">About</a><a href="#contact">Contact</a></nav>
+</header>
+
+<main>
+  <section>
+    <h1>Marketing that fills your calendar, not just your dashboard.</h1>
+    <p class="lead">We're a 14-person team in Denver building websites, search and ad campaigns for home services,
+      dental practices, restaurants and growing online brands.</p>
+    <ul class="services">
+      <li>Websites &amp; landing pages</li>
+      <li>SEO &amp; Google Business Profile</li>
+      <li>Google, Meta &amp; LinkedIn Ads</li>
+      <li>Social media management</li>
+      <li>Branding &amp; identity</li>
+      <li>Email marketing</li>
+    </ul>
+    <p class="proof">Tell us what you're working on. A strategist reads every message and replies within one business day.</p>
+  </section>
+
+  <form id="contact" novalidate>
+    <h2>Start a project</h2>
+    <p class="sub">An email or a phone number is enough to get back to you.</p>
+    <div class="row">
+      <div><label for="name">Name</label><input id="name" name="name" autocomplete="name" required></div>
+      <div><label for="company">Company <span class="opt">(optional)</span></label><input id="company" name="company" autocomplete="organization"></div>
+    </div>
+    <div class="row">
+      <div><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email"></div>
+      <div><label for="phone">Phone <span class="opt">(optional)</span></label><input id="phone" name="phone" type="tel" autocomplete="tel"></div>
+    </div>
+    <label for="message">How can we help?</label>
+    <textarea id="message" name="message" required placeholder="What you need, your timeline and budget if you know them."></textarea>
+    <button type="submit">Send message</button>
+    <div class="status" role="status" aria-live="polite"></div>
+  </form>
+</main>
+
+<footer>Copperline Digital is a fictional agency: this page is part of an automation demo.</footer>
+
+<script>
+  // The n8n Webhook node that receives the form (see workflows/ and README).
+  const WEBHOOK_URL = 'http://localhost:5678/webhook/lead-intake';
+
+  const form = document.getElementById('contact');
+  const status = form.querySelector('.status');
+  const button = form.querySelector('button');
+
+  function show(text, kind) {
+    status.textContent = text;
+    status.className = 'status ' + (kind || '');
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form).entries());
+    for (const k of Object.keys(data)) data[k] = data[k].trim();
+    if (!data.name || !data.message) return show('Please add your name and a short message.', 'err');
+    if (!data.email && !data.phone) return show('Please leave an email or a phone number.', 'err');
+
+    button.disabled = true;
+    show('Sending...');
+    try {
+      const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, submitted_at: new Date().toISOString() }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      form.reset();
+      show("Thanks! We've got your message and will reply within one business day.", 'ok');
+    } catch (e) {
+      show('Something went wrong sending your message. Please try again or email hello@copperlinedigital.example.', 'err');
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

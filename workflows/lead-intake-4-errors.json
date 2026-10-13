@@ -1,0 +1,146 @@
+{
+  "id": "LeadIntakeErrs01",
+  "name": "Lead Intake · 4 Errors",
+  "description": "Marks failed leads and alerts Slack.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Errors\nRuns when any Lead Intake workflow fails (after the per-node retries). Marks the lead as `error` in the log and posts to Slack. The next time the same lead arrives it is retried, skipping steps that already succeeded.",
+        "height": 160,
+        "width": 760,
+        "color": 6
+      },
+      "id": "a8d7d335-b0a8-45db-ac29-e08bc0751048",
+      "name": "Note: errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c0df8545-7277-4a2f-afaf-845d2f17fb71",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE intake.leads SET status = 'error', error = $2, updated_at = now()\nWHERE execution_id = $1 AND status = 'processing' RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ String($json.execution?.id ?? ''), `${$json.execution?.lastNodeExecuted ?? 'unknown step'}: ${$json.execution?.error?.message ?? 'unknown error'}`.slice(0, 1000) ] }}"
+        }
+      },
+      "id": "15c724db-4ccf-4d88-abdd-69c626a619c1",
+      "name": "Mark lead failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $('On workflow error').first().json;\nconst lead = $input.first().json;\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst title = `⚠️ Lead intake failed: ${e.workflow?.name ?? 'workflow'}`;\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150) } },\n  { type: 'section', text: { type: 'mrkdwn', text: `*${esc(e.execution?.lastNodeExecuted ?? 'unknown step')}:* ${esc(e.execution?.error?.message ?? 'unknown error')}` } },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: `${lead.id ? `Lead #${lead.id} marked as error; resubmitting it retries from the failed step.` : 'No lead row matched.'} ${e.execution?.url ? `<${e.execution.url}|Open execution>` : ''}` }] },\n];\nreturn [{ json: { text: title, blocks: JSON.stringify({ blocks }) } }];\n"
+      },
+      "id": "fd1094b1-8847-469c-a94b-7f47f60351bb",
+      "name": "Error Slack message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#leads"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ $json.blocks }}",
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "84f85c05-e397-4f83-add4-337403833932",
+      "name": "Slack: error",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "On workflow error": {
+      "main": [
+        [
+          {
+            "node": "Mark lead failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark lead failed": {
+      "main": [
+        [
+          {
+            "node": "Error Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Slack message": {
+      "main": [
+        [
+          {
+            "node": "Slack: error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

@@ -1,0 +1,90 @@
+{
+  "id": "LeadIntakeTest01",
+  "name": "Lead Intake · Test inbox",
+  "description": "Test tooling: inserts test emails into the demo inbox.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Test tooling only\nLets `scripts/send-test-leads.mjs` drop test emails into the demo inbox (Gmail API `messages.insert`), so they arrive from the lead's own address. Publish it only while running the test set.",
+        "height": 180,
+        "width": 760,
+        "color": 3
+      },
+      "id": "7dc73832-438f-4264-aa65-9e8382c594bd",
+      "name": "Note: test",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "test-inbox",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "id": "f809eb37-b774-40b0-a914-c95e18d27e22",
+      "name": "Test email",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "4f0d2b8e-7c1a-4e3b-8d5f-2a9c6e1b7d30"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { raw: $json.body.raw, labelIds: ['INBOX', 'UNREAD'] } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "85f049bf-265c-4c62-a41c-10621c8d0456",
+      "name": "Put in inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Test email": {
+      "main": [
+        [
+          {
+            "node": "Put in inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadIntakeErrs01",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

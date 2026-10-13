@@ -1,0 +1,59 @@
+{
+  "note": "Models under test. The report only reads variant directories named baseline or v<N>. Prices are USD per million tokens (standard tier, checked 2026-09-27); thinking tokens are billed as output.",
+  "models": [
+    {
+      "variant": "baseline",
+      "label": "Claude Sonnet 5 (effort low)",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "settings": { "effort": "low" },
+      "price": { "input": 2.0, "output": 10.0 }
+    },
+    {
+      "variant": "v1",
+      "label": "Claude Haiku 4.5",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "settings": {},
+      "price": { "input": 1.0, "output": 5.0 }
+    },
+    {
+      "variant": "v2",
+      "label": "Claude Opus 5.5 (effort low)",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "settings": { "effort": "low" },
+      "price": { "input": 4.0, "output": 20.0 }
+    },
+    {
+      "variant": "v3",
+      "label": "Gemini 3.8 Flash (thinking low)",
+      "provider": "google",
+      "model": "gemini-3.8-flash",
+      "settings": { "thinkingLevel": "low" },
+      "price": { "input": 0.75, "output": 3.75 },
+      "price_after_2026": { "input": 1.5, "output": 7.5 }
+    },
+    {
+      "variant": "v4",
+      "label": "Gemini 3.5 Flash-Lite",
+      "provider": "google",
+      "model": "gemini-3.5-flash-lite",
+      "settings": {},
+      "price": { "input": 0.3, "output": 2.5 }
+    },
+    {
+      "variant": "v5",
+      "label": "Gemini 3.1 Flash-Lite",
+      "provider": "google",
+      "model": "gemini-3.1-flash-lite",
+      "settings": {},
+      "price": { "input": 0.25, "output": 1.5 }
+    }
+  ],
+  "judges_note": "Judges grade the draft replies (eval/judge.mjs) on subscriptions rather than API keys: Claude through Claude Code in print mode, Gemini by pasting exported prompts into the Gemini app. Neither model is under test.",
+  "judges": [
+    { "id": "claude", "label": "Claude Opus 5", "mode": "cli", "model": "claude-opus-5" },
+    { "id": "gemini", "label": "Gemini 3.1 Pro (Gemini app)", "mode": "web", "model": "gemini-3.1-pro (Gemini app)" }
+  ]
+}

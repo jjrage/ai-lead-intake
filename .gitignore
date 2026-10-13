@@ -1,0 +1,31 @@
+# Internal notes (kept out of the public repository)
+CLAUDE.md
+docs/BRIEF.md
+docs/DEVLOG.md
+docs/internal-tools/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# n8n data (database, credentials, logs)
+.n8n/
+n8n_data/
+
+# Generated eval output (review pages, pilot runs, raw transcripts)
+eval/out/
+eval/pilot/
+eval/runs/*/traces/
+eval/runs/*/progress.txt
+eval/runs/*.log
+eval/runs/*/ref/
+eval/runs/report.html
+eval/runs/trajectory/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+node_modules/

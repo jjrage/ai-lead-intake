@@ -1,0 +1,1532 @@
+{
+  "id": "LeadIntakeProc01",
+  "name": "Lead Intake · 3 Process lead",
+  "description": "Classifies one lead with the configured model and files it: HubSpot, Gmail draft, Slack, log.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Process one lead\n1. **Claim** the lead in Postgres (`intake.leads`): new, duplicate (skipped) or retry after a failure.\n2. **Model** reads the message and returns strict JSON (schema in `prompts/`). The answer is checked; a bad answer goes to review instead of failing.\n3. **Sales lead** → HubSpot contact (no duplicates by email or phone) → deal (reused within 90 days) + note → Gmail **draft** (never sent) → Slack if hot or flagged.\n4. **Everything else** is logged; unclear messages are posted to Slack for a person.\n\nEvery step records its result on the lead row, so a retried lead picks up where it failed.",
+        "height": 300,
+        "width": 1480,
+        "color": 6
+      },
+      "id": "3439b697-0a65-4ea7-a914-2f0ba4eba138",
+      "name": "Note: overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Switch the model\nIn **Config** set `provider` to `gemini` (Gemini 3.8 Flash, default) or `claude` (Claude Opus 5.5).\n\nBoth were picked by comparing 6 models on 30 test leads (`eval/`). Same prompt and schema either way.",
+        "height": 260,
+        "width": 300,
+        "color": 4
+      },
+      "id": "426f23a3-d557-4114-abda-f802945a403b",
+      "name": "Note: model switch",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "2c5e172f-e404-48bf-ac8e-fa60b754bb10",
+      "name": "When called by intake",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-provider",
+              "name": "provider",
+              "value": "gemini",
+              "type": "string"
+            },
+            {
+              "id": "cfg-gemini",
+              "name": "gemini_model",
+              "value": "gemini-3.8-flash",
+              "type": "string"
+            },
+            {
+              "id": "cfg-claude",
+              "name": "claude_model",
+              "value": "claude-opus-5-5",
+              "type": "string"
+            },
+            {
+              "id": "cfg-slack",
+              "name": "slack_channel",
+              "value": "#leads",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "54f0ade2-ee36-4305-ad76-133a9db0acfc",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- One row per inbound lead. A new lead is inserted; a lead seen before is either a duplicate\n-- (counted and skipped) or, if its last attempt failed or stalled, taken again for a retry.\nWITH k AS (SELECT encode(sha256(convert_to($1::text, 'UTF8')), 'hex') AS key),\nins AS (\n  INSERT INTO intake.leads (dedupe_key, source, received_at, payload, execution_id)\n  SELECT key, $2, $3::timestamptz, $4::jsonb, $5 FROM k\n  ON CONFLICT (dedupe_key) DO NOTHING\n  RETURNING *\n),\ncur AS (\n  SELECT l.id, (l.status = 'error' OR (l.status = 'processing' AND l.updated_at < now() - interval '15 minutes')) AS retry\n  FROM intake.leads l JOIN k ON l.dedupe_key = k.key\n  WHERE NOT EXISTS (SELECT 1 FROM ins)\n),\nupd AS (\n  UPDATE intake.leads l SET\n    attempts     = l.attempts + CASE WHEN cur.retry THEN 1 ELSE 0 END,\n    duplicates   = l.duplicates + CASE WHEN cur.retry THEN 0 ELSE 1 END,\n    status       = CASE WHEN cur.retry THEN 'processing' ELSE l.status END,\n    execution_id = CASE WHEN cur.retry THEN $5 ELSE l.execution_id END,\n    error        = CASE WHEN cur.retry THEN NULL ELSE l.error END,\n    last_seen_at = now(),\n    updated_at   = CASE WHEN cur.retry THEN now() ELSE l.updated_at END\n  FROM cur WHERE l.id = cur.id\n  RETURNING l.*, cur.retry\n)\nSELECT id, status, hubspot_contact_id, hubspot_deal_id, gmail_draft_id, slack_ts, 'new' AS outcome FROM ins\nUNION ALL\nSELECT id, status, hubspot_contact_id, hubspot_deal_id, gmail_draft_id, slack_ts,\n       CASE WHEN retry THEN 'retry' ELSE 'duplicate' END FROM upd",
+        "options": {
+          "queryReplacement": "={{ [ $('When called by intake').first().json.raw_key, $('When called by intake').first().json.source, $('When called by intake').first().json.received_at, $('When called by intake').first().json.input, $execution.id ] }}"
+        }
+      },
+      "id": "19fde1cd-7a7c-44e6-a44f-a8fe59fb3922",
+      "name": "Claim lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e617b0a3-d7ef-063a-6adf-2308ef7983a5",
+              "leftValue": "={{ $json.outcome }}",
+              "rightValue": "duplicate",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "3f6b3a50-efc3-478e-ae0f-8cee4b006978",
+      "name": "New or retry?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "6953de67-d85d-4daf-a61e-789232dd71bb",
+      "name": "Duplicate: skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "/home/node/.n8n-files/prompts/lead-intake.*",
+        "options": {}
+      },
+      "id": "ef1fb7bf-ef75-4b20-a11e-e5bbee38d648",
+      "name": "Read prompt files",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "data",
+        "destinationKey": "text",
+        "options": {}
+      },
+      "id": "c13b0e1f-ccf8-4990-a9ab-0110388a5763",
+      "name": "Read prompt text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds the model call for the provider chosen in Config. The system prompt and JSON schema come\n// from prompts/ (mounted read-only): the same files the model comparison in eval/ used.\n// formatLead, claudeRequestBody and geminiRequestBody are copied from eval/lib.\n\nconst EMPTY = '(not provided)';\n\nconst fence = (text) => String(text ?? '').replaceAll('</message>', '</ message>');\n\nfunction formatLead(input) {\n  const header = [`Received at: ${input.received_at}`];\n  let body;\n  if (input.channel === 'email') {\n    header.push('Channel: email');\n    body = [`From: ${input.from}`, `Subject: ${input.subject}`, '', input.body];\n  } else {\n    header.push('Channel: website contact form');\n    body = [\n      `Name: ${input.name || EMPTY}`,\n      `Email: ${input.email || EMPTY}`,\n      `Phone: ${input.phone || EMPTY}`,\n      `Company: ${input.company || EMPTY}`,\n      'Message:',\n      input.message,\n    ];\n  }\n  return [...header, '', '<message>', fence(body.join('\\n')), '</message>'].join('\\n');\n}\n\nconst MAX_OUTPUT_TOKENS = 8000;\n\nfunction claudeRequestBody({ model, settings = {}, system, user, schema, maxTokens = MAX_OUTPUT_TOKENS }) {\n  const outputConfig = { format: { type: 'json_schema', schema } };\n  if (settings.effort) outputConfig.effort = settings.effort;\n  return {\n    model,\n    max_tokens: maxTokens,\n    system,\n    messages: [{ role: 'user', content: user }],\n    output_config: outputConfig,\n  };\n}\n\nfunction geminiRequestBody({ settings = {}, system, user, schema, maxTokens = MAX_OUTPUT_TOKENS }) {\n  const generationConfig = {\n    responseMimeType: 'application/json',\n    responseJsonSchema: schema,\n    maxOutputTokens: maxTokens,\n  };\n  if (settings.thinkingLevel) generationConfig.thinkingConfig = { thinkingLevel: settings.thinkingLevel };\n  return {\n    systemInstruction: { parts: [{ text: system }] },\n    contents: [{ role: 'user', parts: [{ text: user }] }],\n    generationConfig,\n  };\n}\n\nlet system = null;\nlet schema = null;\nfor (const item of $('Read prompt text').all()) {\n  try { schema = JSON.parse(item.json.text); } catch { system = item.json.text; }\n}\nif (!system || !schema) throw new Error('Could not read prompts/lead-intake.system.md and lead-intake.schema.json');\n\nconst config = $('Config').first().json;\nconst lead = $('When called by intake').first().json;\nconst user = formatLead(lead.input);\n\n// Settings as measured in eval/: Gemini thinking low, Claude effort low.\nlet request;\nif (config.provider === 'gemini') {\n  const model = config.gemini_model;\n  request = {\n    model,\n    url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,\n    body: geminiRequestBody({ settings: { thinkingLevel: 'low' }, system, user, schema }),\n  };\n} else if (config.provider === 'claude') {\n  const model = config.claude_model;\n  request = {\n    model,\n    url: 'https://api.anthropic.com/v1/messages',\n    body: claudeRequestBody({ model, settings: { effort: 'low' }, system, user, schema }),\n  };\n} else {\n  throw new Error(`Config: provider must be \"gemini\" or \"claude\", got \"${config.provider}\"`);\n}\nreturn [{ json: { provider: config.provider, ...request, schema } }];\n"
+      },
+      "id": "7748289f-4f67-411d-a7fc-45eda475078d",
+      "name": "Build model request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f8a23867-c208-7efc-0973-c43d22d7f04c",
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "gemini",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Gemini"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3c7456c1-d4bd-4d50-bebb-ab374c8fbafa",
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "claude",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Claude"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b15fb7d4-012c-4cf2-a0bc-c752fce04b54",
+      "name": "Provider",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "d6df2b6c-8f56-4470-a6af-bca018932eaa",
+      "name": "Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        100
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "liCredGemini0001",
+          "name": "Gemini API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        }
+      },
+      "id": "f73241cf-161e-464d-a51c-6c8fedce018d",
+      "name": "Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        320
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "liCredAnthropic1",
+          "name": "Anthropic API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turns the raw API response into a checked lead record: parses the JSON, validates it against the\n// schema, prices the call and picks the route. parseAndValidate and isHot are copied from eval/lib.\n\nfunction typeOf(v) {\n  if (v === null) return 'null';\n  if (Array.isArray(v)) return 'array';\n  return typeof v === 'number' ? 'number' : typeof v;\n}\n\nfunction check(schema, value, path, errors) {\n  if (schema.anyOf) {\n    const ok = schema.anyOf.some((s) => {\n      const sub = [];\n      check(s, value, path, sub);\n      return sub.length === 0;\n    });\n    if (!ok) errors.push(`${path}: matches none of the allowed shapes`);\n    return;\n  }\n  const actual = typeOf(value);\n  if (schema.type && schema.type !== actual && !(schema.type === 'integer' && Number.isInteger(value))) {\n    errors.push(`${path}: expected ${schema.type}, got ${actual}`);\n    return;\n  }\n  if (schema.enum && !schema.enum.includes(value)) errors.push(`${path}: '${value}' is not one of ${schema.enum.join(', ')}`);\n  if (actual === 'object') {\n    for (const key of schema.required ?? []) if (!(key in value)) errors.push(`${path}.${key}: missing`);\n    for (const [key, v] of Object.entries(value)) {\n      const sub = schema.properties?.[key];\n      if (sub) check(sub, v, `${path}.${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push(`${path}.${key}: not allowed`);\n    }\n  }\n  if (actual === 'array' && schema.items) value.forEach((v, i) => check(schema.items, v, `${path}[${i}]`, errors));\n}\n\nfunction parseAndValidate(text, schema) {\n  let value;\n  try {\n    value = JSON.parse(text);\n  } catch (e) {\n    return { ok: false, value: null, errors: [`not valid JSON: ${e.message}`] };\n  }\n  const errors = [];\n  check(schema, value, '$', errors);\n  return { ok: errors.length === 0, value, errors };\n}\n\nconst HOT_MIN_BUDGET_USD = { one_time: 10000, monthly: 2500 };\n\nfunction isHot(result) {\n  if (result.category !== 'sales_lead' || result.urgency !== 'high') return false;\n  const services = result.services ?? [];\n  if (services.length > 0 && services.every((s) => s === 'other')) return false;\n  const { min, max, currency, period } = result.budget ?? {};\n  const amount = max ?? min;\n  const threshold = HOT_MIN_BUDGET_USD[period];\n  if (currency === 'USD' && amount != null && threshold != null && amount < threshold) return false;\n  return true;\n}\n\n// USD per million tokens, list prices checked 2026-09-27 (thinking tokens bill as output).\nconst PRICES = {\n  'gemini-3.8-flash': { input: 0.75, output: 3.75 },\n  'claude-opus-5-5': { input: 4.0, output: 20.0 },\n};\n\nconst request = $('Build model request').first().json;\nconst lead = $('When called by intake').first().json;\nconst claim = $('Claim lead').first().json;\nconst response = $input.first().json;\n\nlet text = '';\nlet model = request.model;\nlet stopReason = 'error';\nlet usage = { input_tokens: 0, output_tokens: 0 };\nlet callError = null;\n\nif (response.error) {\n  callError = typeof response.error === 'string' ? response.error : (response.error.message ?? JSON.stringify(response.error));\n} else if (request.provider === 'claude') {\n  text = (response.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('');\n  model = response.model ?? model;\n  stopReason = response.stop_reason;\n  usage = { input_tokens: response.usage?.input_tokens ?? 0, output_tokens: response.usage?.output_tokens ?? 0 };\n} else {\n  const candidate = response.candidates?.[0];\n  text = (candidate?.content?.parts ?? []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('');\n  model = response.modelVersion ?? model;\n  const finish = candidate?.finishReason ?? response.promptFeedback?.blockReason ?? 'NO_CANDIDATE';\n  stopReason = { STOP: 'end_turn', MAX_TOKENS: 'max_tokens', SAFETY: 'refusal' }[finish] ?? finish.toLowerCase();\n  const u = response.usageMetadata ?? {};\n  usage = { input_tokens: u.promptTokenCount ?? 0, output_tokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) };\n}\nconst price = PRICES[request.model];\nconst costUsd = price ? (usage.input_tokens * price.input + usage.output_tokens * price.output) / 1e6 : null;\n\n// Contact details for the CRM: the model's extraction, falling back to the sender's address.\nconst checked = callError ? { ok: false, value: null, errors: [callError] } : parseAndValidate(text, request.schema);\nconst result = checked.ok && stopReason === 'end_turn' ? checked.value : null;\nconst c = result?.contact ?? {};\nconst email = String(c.email || lead.reply_to || '').trim().toLowerCase() || null;\nconst digits = String(c.phone ?? '').replace(/\\D/g, '');\nconst phone = !digits ? null\n  : digits.length === 10 ? `+1${digits}`\n  : digits.length === 11 && digits.startsWith('1') ? `+${digits}`\n  : String(c.phone).trim().startsWith('+') ? `+${digits}` : String(c.phone).trim();\nconst [firstname, ...rest] = String(c.name ?? '').trim().split(/\\s+/).filter(Boolean);\n\n// Route: a bad answer or an unclear message goes to a person instead of failing the workflow.\nlet route;\nlet reviewReason = null;\nif (!result) {\n  route = 'review';\n  const why = callError ? 'API call failed' : stopReason !== 'end_turn' ? `stop reason ${stopReason}` : 'answer failed the schema check';\n  reviewReason = `AI answer unusable (${why}): ${checked.errors.slice(0, 3).join('; ')}`.slice(0, 500);\n} else if (result.category === 'sales_lead' && !email && !phone) {\n  route = 'review';\n  reviewReason = 'Sales lead without an email address or phone number';\n} else if (result.category === 'sales_lead') {\n  route = 'lead';\n} else if (result.needs_review) {\n  route = 'review';\n  reviewReason = result.review_reason;\n} else {\n  route = 'not_a_lead';\n}\n\nreturn [{\n  json: {\n    lead_id: claim.id,\n    claim,\n    source: lead.source,\n    input: lead.input,\n    reply_to: lead.reply_to,\n    thread_id: lead.thread_id,\n    provider: request.provider,\n    model,\n    stop_reason: stopReason,\n    usage,\n    cost_usd: costUsd,\n    result,\n    is_hot: result ? isHot(result) : false,\n    needs_review: !result || !!result.needs_review || route === 'review',\n    route,\n    review_reason: reviewReason ?? result?.review_reason ?? null,\n    contact: { firstname: firstname ?? null, lastname: rest.join(' ') || null, email, phone, company: c.company ?? null },\n  },\n}];\n"
+      },
+      "id": "79a9b796-fb67-49cf-a213-bba04fb83244",
+      "name": "Check AI answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "37b4226a-43b7-907f-3bb0-1c49ff77622e",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "lead",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Sales lead"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "67fc974a-5355-b28c-d122-d5658ad68526",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Needs review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "992bc9ce-ceee-4002-2937-f1204c016ba2",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "not_a_lead",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Not a lead"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "34663c64-e60d-4204-a4b6-bb1ea6edfa25",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE intake.leads SET status = 'not_a_lead', category = $2, is_hot = $3::boolean, needs_review = $4::boolean, result = $5::jsonb,\n  model = $6, input_tokens = $7::int, output_tokens = $8::int, cost_usd = $9::numeric, error = NULL, updated_at = now()\nWHERE id = $1::bigint RETURNING id, status",
+        "options": {
+          "queryReplacement": "={{ [ $('Check AI answer').first().json.lead_id, $('Check AI answer').first().json.result?.category ?? null, $('Check AI answer').first().json.is_hot, $('Check AI answer').first().json.needs_review, $('Check AI answer').first().json.result, $('Check AI answer').first().json.model, $('Check AI answer').first().json.usage.input_tokens, $('Check AI answer').first().json.usage.output_tokens, $('Check AI answer').first().json.cost_usd ] }}"
+        }
+      },
+      "id": "e4f121b1-c33b-4b89-a1a0-4a70a1203e5b",
+      "name": "Log: not a lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2860,
+        740
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The most recent lead (last 90 days, with a HubSpot deal) from the same email or phone.\nSELECT hubspot_contact_id AS contact_id, hubspot_deal_id AS deal_id\nFROM intake.leads\nWHERE id <> $1::bigint AND hubspot_deal_id IS NOT NULL AND created_at > now() - interval '90 days'\n  AND ((length($2) > 0 AND lower(result->'contact'->>'email') = $2)\n    OR (length($3) >= 10 AND right(regexp_replace(coalesce(result->'contact'->>'phone', ''), '[^0-9]', '', 'g'), 10) = $3))\nORDER BY created_at DESC LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ [ $('Check AI answer').first().json.lead_id, $('Check AI answer').first().json.contact.email ?? '', String($('Check AI answer').first().json.contact.phone ?? '').replace(/\\D/g, '').slice(-10) ] }}"
+        }
+      },
+      "id": "54abf8b5-2159-4db7-a717-bf00d5876595",
+      "name": "Known contact?",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2420,
+        620
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9af92b2d-9149-f914-f9a7-8264d068c3b6",
+              "leftValue": "={{ !!$json.deal_id && ['existing_client', 'other'].includes($('Check AI answer').first().json.result.category) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b4ad0b17-a17c-41d1-ae33-db423628c0fe",
+      "name": "Follow-up?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A follow-up from someone already in the CRM: attach it to their contact and open deal.\nconst ctx = $('Check AI answer').first().json;\nconst known = $input.first().json;\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst i = ctx.input;\nconst original = i.channel === 'email' ? `Subject: ${i.subject}\\n\\n${i.body}` : i.message;\nconst body = [\n  `<p><b>Follow-up message.</b> ${esc(ctx.result.summary)}</p>`,\n  `<p>${esc(original).replace(/\\n/g, '<br>')}</p>`,\n  `<p><i>AI Lead Intake · ${esc(ctx.model)} · $${(ctx.cost_usd ?? 0).toFixed(4)}</i></p>`,\n].join('');\nreturn [{ json: { contact_id: known.contact_id, deal_id: known.deal_id, body } }];\n"
+      },
+      "id": "270467ae-bae6-411d-a0df-d8e4ad12c563",
+      "name": "Follow-up note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/notes",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: { hs_timestamp: new Date().toISOString(), hs_note_body: $json.body }, associations: [{ to: { id: $json.contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }] }, { to: { id: $json.deal_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 214 }] }] } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "440d14f3-8a99-4458-a866-8e0b5454e177",
+      "name": "HubSpot: add follow-up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        540
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE intake.leads SET status = 'processed', category = $2, is_hot = $3::boolean, needs_review = $4::boolean, result = $5::jsonb,\n  model = $6, input_tokens = $7::int, output_tokens = $8::int, cost_usd = $9::numeric,\n  hubspot_contact_id = $10, hubspot_deal_id = $11, error = NULL, updated_at = now()\nWHERE id = $1::bigint RETURNING id, status",
+        "options": {
+          "queryReplacement": "={{ [ $('Check AI answer').first().json.lead_id, $('Check AI answer').first().json.result?.category ?? null, $('Check AI answer').first().json.is_hot, $('Check AI answer').first().json.needs_review, $('Check AI answer').first().json.result, $('Check AI answer').first().json.model, $('Check AI answer').first().json.usage.input_tokens, $('Check AI answer').first().json.usage.output_tokens, $('Check AI answer').first().json.cost_usd, $('Follow-up note').first().json.contact_id, $('Follow-up note').first().json.deal_id ] }}"
+        }
+      },
+      "id": "d48405b7-bbf8-4c01-a16c-bbcab2f54158",
+      "name": "Log: follow-up",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3300,
+        540
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Check AI answer').first().json;\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst i = ctx.input;\nconst sender = i.channel === 'email' ? i.from : [i.name, i.email, i.phone].filter(Boolean).join(' · ');\nconst text = i.channel === 'email' ? `${i.subject}\\n${i.body}` : i.message;\nconst title = `👀 Needs a look: ${ctx.result?.category?.replace(/_/g, ' ') ?? 'unreadable message'}`;\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150) } },\n  { type: 'section', text: { type: 'mrkdwn', text: `*Why:* ${esc(ctx.review_reason ?? 'flagged by the model')}` } },\n  { type: 'section', text: { type: 'mrkdwn', text: `*From:* ${esc(sender)}\\n>${esc(text.slice(0, 600)).replace(/\\n/g, '\\n>')}` } },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: `${i.channel === 'email' ? 'Email' : 'Website form'} · lead #${ctx.lead_id} · no CRM record or draft created` }] },\n];\nreturn [{ json: { text: title, blocks: JSON.stringify({ blocks }) } }];\n"
+      },
+      "id": "8931de9a-7752-4f05-aa9e-f75c6eab2c57",
+      "name": "Review Slack message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config').first().json.slack_channel }}"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ $json.blocks }}",
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "c8ac024d-2c98-4fc1-a1cf-29fdda9934f2",
+      "name": "Slack: needs a look",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2640,
+        420
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE intake.leads SET status = 'needs_review', category = $2, is_hot = $3::boolean, needs_review = $4::boolean, result = $5::jsonb,\n  model = $6, input_tokens = $7::int, output_tokens = $8::int, cost_usd = $9::numeric, error = $10,\n  slack_ts = COALESCE($11, slack_ts), updated_at = now()\nWHERE id = $1::bigint RETURNING id, status",
+        "options": {
+          "queryReplacement": "={{ [ $('Check AI answer').first().json.lead_id, $('Check AI answer').first().json.result?.category ?? null, $('Check AI answer').first().json.is_hot, $('Check AI answer').first().json.needs_review, $('Check AI answer').first().json.result, $('Check AI answer').first().json.model, $('Check AI answer').first().json.usage.input_tokens, $('Check AI answer').first().json.usage.output_tokens, $('Check AI answer').first().json.cost_usd, $('Check AI answer').first().json.review_reason, $json.ts ?? $json.message?.ts ?? null ] }}"
+        }
+      },
+      "id": "1e0d71f5-5aba-4ef4-a2d7-b64b41b54864",
+      "name": "Log: needs review",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2860,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Everything the HubSpot calls need, computed once: contact search, contact fields, deal and note.\n\nconst ctx = $input.first().json;\nconst r = ctx.result;\nconst c = ctx.contact;\nconst LABELS = { website: 'Website', seo: 'SEO', paid_ads: 'Paid ads', social_media: 'Social media', branding: 'Branding', email_marketing: 'Email marketing', other: 'Not offered' };\nconst services = r.services.map((s) => LABELS[s] ?? s);\n\nconst b = r.budget;\nconst money = (n) => (b.currency && b.currency !== 'USD' ? `${Number(n).toLocaleString('en-US')} ${b.currency}` : `$${Number(n).toLocaleString('en-US')}`);\nlet budget = 'not stated';\nif (b.period !== 'unknown') {\n  if (b.min != null && b.max != null && b.min !== b.max) budget = `${money(b.min)}–${money(b.max)}`;\n  else if (b.min == null && b.max != null) budget = `up to ${money(b.max)}`;\n  else budget = money(b.max ?? b.min);\n  if (b.period === 'monthly') budget += '/month';\n}\n\nconst name = [c.firstname, c.lastname].filter(Boolean).join(' ');\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst original = ctx.input.channel === 'email' ? `From: ${ctx.input.from}\\nSubject: ${ctx.input.subject}\\n\\n${ctx.input.body}` : ctx.input.message;\n\nconst contactProperties = {};\nfor (const [k, v] of Object.entries({ firstname: c.firstname, lastname: c.lastname, email: c.email, phone: c.phone, company: c.company })) if (v) contactProperties[k] = v;\n\nconst filterGroups = [];\nif (c.email) filterGroups.push({ filters: [{ propertyName: 'email', operator: 'EQ', value: c.email }] });\nif (c.phone) filterGroups.push({ filters: [{ propertyName: 'phone', operator: 'EQ', value: c.phone }] });\n\nconst dealProperties = { dealname: `${c.company || name || c.email || c.phone} – ${services.join(', ') || 'New inquiry'}`, pipeline: 'default', dealstage: 'appointmentscheduled' };\nif (b.currency === 'USD' && b.period === 'one_time' && (b.max ?? b.min) != null) dealProperties.amount = String(b.max ?? b.min);\n\nconst noteBody = [\n  `<p><b>${ctx.is_hot ? 'Hot lead. ' : ''}${esc(r.summary)}</b></p><ul>`,\n  `<li>Source: ${ctx.source === 'email' ? 'email' : 'website form'}</li>`,\n  `<li>Services: ${esc(services.join(', ') || 'not specified')}</li>`,\n  `<li>Budget: ${esc(budget)}</li>`,\n  `<li>Urgency: ${esc(r.urgency)}</li>`,\n  `<li>Language: ${esc(r.language)}</li>`,\n  r.needs_review ? `<li>Needs review: ${esc(r.review_reason ?? 'yes')}</li>` : '',\n  `</ul><p><b>Original message</b><br>${esc(original).replace(/\\n/g, '<br>')}</p>`,\n  `<p><i>AI Lead Intake · ${esc(ctx.model)} · $${(ctx.cost_usd ?? 0).toFixed(4)}</i></p>`,\n].join('');\n\nreturn [{ json: { search: { filterGroups, properties: ['email', 'phone', 'firstname', 'lastname', 'company'], limit: 1 }, contactProperties, dealProperties, noteBody, budget, services } }];\n"
+      },
+      "id": "d7a737af-993d-47bb-aa8d-268e987427e2",
+      "name": "Prepare CRM records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.search }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "def34f31-f3e2-457b-a989-015e992f6ffb",
+      "name": "HubSpot: find contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        100
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update the contact the search found (only filling empty fields), or create one. With an email,\n// create goes through upsert-by-email, so a contact HubSpot hasn't indexed for search yet is not duplicated.\nconst crm = $('Prepare CRM records').first().json;\nconst found = $input.first().json.results?.[0] ?? null;\nconst base = 'https://api.hubapi.com/crm/v3/objects/contacts';\nconst props = crm.contactProperties;\nlet request;\nif (found) {\n  const current = found.properties ?? {};\n  const fill = Object.fromEntries(Object.entries(props).filter(([k]) => !current[k]));\n  // HubSpot rejects an empty PATCH; with nothing to add, just read the contact back.\n  request = Object.keys(fill).length\n    ? { method: 'PATCH', url: `${base}/${found.id}`, body: { properties: fill } }\n    : { method: 'POST', url: `${base}/batch/read`, body: { inputs: [{ id: found.id }], properties: ['email'] } };\n} else if (props.email) {\n  request = { method: 'POST', url: `${base}/batch/upsert`, body: { inputs: [{ idProperty: 'email', id: props.email, properties: { ...props, hs_lead_status: 'NEW' } }] } };\n} else {\n  request = { method: 'POST', url: base, body: { properties: { ...props, hs_lead_status: 'NEW', lifecyclestage: 'lead' } } };\n}\nreturn [{ json: request }];\n"
+      },
+      "id": "8742dd98-20bc-45b1-a9d6-dca5f691e2d0",
+      "name": "Prepare contact save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "85a1d893-170c-4885-a9fc-007c44a027be",
+      "name": "HubSpot: save contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        100
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Save the HubSpot contact on the lead and find a deal to reuse: this lead's own (on a retry)\n-- or a deal opened for the same contact in the last 90 days.\nWITH upd AS (\n  UPDATE intake.leads SET hubspot_contact_id = $1, updated_at = now()\n  WHERE id = $2::bigint\n  RETURNING hubspot_deal_id\n)\nSELECT $1::text AS contact_id,\n       COALESCE(\n         (SELECT hubspot_deal_id FROM upd),\n         (SELECT hubspot_deal_id FROM intake.leads\n           WHERE hubspot_contact_id = $1 AND hubspot_deal_id IS NOT NULL AND id <> $2::bigint\n             AND created_at > now() - interval '90 days'\n           ORDER BY created_at DESC LIMIT 1)\n       ) AS deal_id",
+        "options": {
+          "queryReplacement": "={{ [ $json.results?.[0]?.id ?? $json.id, $('Check AI answer').first().json.lead_id ] }}"
+        }
+      },
+      "id": "fd58944e-d9f2-4394-a804-209c41cbad1b",
+      "name": "Remember contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3300,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5e2b55e9-f8bf-5996-9e32-64155dfaadb8",
+              "leftValue": "={{ $json.deal_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d9751631-02dd-423e-a7f7-c46d5d8e981a",
+      "name": "Deal to reuse?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/deals",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: $('Prepare CRM records').first().json.dealProperties, associations: [{ to: { id: $json.contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 3 }] }] } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "67836378-ddc1-4fda-a887-a2ab632b3f86",
+      "name": "HubSpot: create deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        260
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE intake.leads SET hubspot_deal_id = $1, updated_at = now() WHERE id = $2::bigint\nRETURNING hubspot_contact_id AS contact_id, hubspot_deal_id AS deal_id",
+        "options": {
+          "queryReplacement": "={{ [ $json.id, $('Check AI answer').first().json.lead_id ] }}"
+        }
+      },
+      "id": "7c1ce2f2-3c23-4c4c-ac40-d9e62521c054",
+      "name": "Remember deal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3960,
+        260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/notes",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: { hs_timestamp: new Date().toISOString(), hs_note_body: $('Prepare CRM records').first().json.noteBody }, associations: [{ to: { id: $json.contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }] }, { to: { id: $json.deal_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 214 }] }] } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "e65bf649-8e54-4ebc-a13f-e3930c6a8cff",
+      "name": "HubSpot: add note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        100
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0db09d76-72f8-10d3-bdd0-106a86a2468b",
+              "leftValue": "={{ !!$('Check AI answer').first().json.result.reply && !!$('Check AI answer').first().json.contact.email && !$('Check AI answer').first().json.claim.gmail_draft_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "fb0ab7c8-2ec1-4f23-a1ca-283cb8d265f6",
+      "name": "Draft needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4400,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $('Check AI answer').first().json.result.reply.subject }}",
+        "emailType": "text",
+        "message": "={{ $('Check AI answer').first().json.result.reply.body }}",
+        "options": {
+          "sendTo": "={{ $('Check AI answer').first().json.contact.email }}",
+          "threadId": "={{ $('Check AI answer').first().json.thread_id && $('Check AI answer').first().json.reply_to === $('Check AI answer').first().json.contact.email ? $('Check AI answer').first().json.thread_id : '' }}"
+        }
+      },
+      "id": "e0751569-4cf9-44d5-a265-2cc2da219a44",
+      "name": "Create Gmail draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        4620,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE intake.leads SET gmail_draft_id = $1, updated_at = now() WHERE id = $2::bigint RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $json.id, $('Check AI answer').first().json.lead_id ] }}"
+        }
+      },
+      "id": "df42e57f-d3d7-4880-a482-f0b7bc458520",
+      "name": "Remember draft",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4840,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "77f4a4e0-de68-aaf4-3168-21aac83af2b0",
+              "leftValue": "={{ ($('Check AI answer').first().json.is_hot || $('Check AI answer').first().json.needs_review) && !$('Check AI answer').first().json.claim.slack_ts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "1d4986d5-f3df-40f9-aa0b-ccbf611ebdd9",
+      "name": "Alert Slack?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5060,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Check AI answer').first().json;\nconst crm = $('Prepare CRM records').first().json;\nconst r = ctx.result;\nconst c = ctx.contact;\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst name = [c.firstname, c.lastname].filter(Boolean).join(' ') || 'Unknown sender';\nconst title = `${ctx.is_hot ? '🔥 Hot lead' : '👀 Lead to review'}: ${c.company || name}`;\nconst deal = $('Remember deal').isExecuted ? $('Remember deal').first().json.deal_id : $('Remember contact').first().json.deal_id;\nconst draft = $('Create Gmail draft').isExecuted || ctx.claim.gmail_draft_id ? 'draft reply saved in Gmail' : 'no draft (no email address)';\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150) } },\n  { type: 'section', text: { type: 'mrkdwn', text: esc(r.summary) } },\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: `*Contact*\\n${esc(name)}${c.company ? `, ${esc(c.company)}` : ''}` },\n    { type: 'mrkdwn', text: `*Reach at*\\n${esc([c.email, c.phone].filter(Boolean).join('\\n') || '—')}` },\n    { type: 'mrkdwn', text: `*Services*\\n${esc(crm.services.join(', ') || '—')}` },\n    { type: 'mrkdwn', text: `*Budget · urgency*\\n${esc(crm.budget)} · ${esc(r.urgency)}` },\n  ] },\n];\nif (ctx.needs_review && ctx.review_reason) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Why review:* ${esc(ctx.review_reason)}` } });\nblocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `${ctx.source === 'email' ? 'Email' : 'Website form'} · HubSpot deal ${deal} · ${draft}` }] });\nreturn [{ json: { text: title, blocks: JSON.stringify({ blocks }) } }];\n"
+      },
+      "id": "85e31045-4eea-4c74-a37f-ec089aab65b4",
+      "name": "Lead Slack message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config').first().json.slack_channel }}"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ $json.blocks }}",
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "b01cf4b5-b5d6-4fde-aa63-d9ab8b6ca639",
+      "name": "Slack: lead alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        5500,
+        0
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE intake.leads SET status = 'processed', category = $2, is_hot = $3::boolean, needs_review = $4::boolean, result = $5::jsonb,\n  model = $6, input_tokens = $7::int, output_tokens = $8::int, cost_usd = $9::numeric,\n  slack_ts = COALESCE($10, slack_ts), error = NULL, updated_at = now()\nWHERE id = $1::bigint RETURNING id, status",
+        "options": {
+          "queryReplacement": "={{ [ $('Check AI answer').first().json.lead_id, $('Check AI answer').first().json.result?.category ?? null, $('Check AI answer').first().json.is_hot, $('Check AI answer').first().json.needs_review, $('Check AI answer').first().json.result, $('Check AI answer').first().json.model, $('Check AI answer').first().json.usage.input_tokens, $('Check AI answer').first().json.usage.output_tokens, $('Check AI answer').first().json.cost_usd, $('Slack: lead alert').isExecuted ? ($('Slack: lead alert').first().json.ts ?? $('Slack: lead alert').first().json.message?.ts ?? null) : null ] }}"
+        }
+      },
+      "id": "975798e7-4752-43a2-a04a-73e404ae1dc8",
+      "name": "Log: processed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5720,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When called by intake": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Claim lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim lead": {
+      "main": [
+        [
+          {
+            "node": "New or retry?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New or retry?": {
+      "main": [
+        [
+          {
+            "node": "Read prompt files",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Duplicate: skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read prompt files": {
+      "main": [
+        [
+          {
+            "node": "Read prompt text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read prompt text": {
+      "main": [
+        [
+          {
+            "node": "Build model request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build model request": {
+      "main": [
+        [
+          {
+            "node": "Provider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider": {
+      "main": [
+        [
+          {
+            "node": "Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "main": [
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude": {
+      "main": [
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI answer": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Prepare CRM records",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Review Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Known contact?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Known contact?": {
+      "main": [
+        [
+          {
+            "node": "Follow-up?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Follow-up?": {
+      "main": [
+        [
+          {
+            "node": "Follow-up note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log: not a lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Follow-up note": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: add follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: add follow-up": {
+      "main": [
+        [
+          {
+            "node": "Log: follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Slack message": {
+      "main": [
+        [
+          {
+            "node": "Slack: needs a look",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: needs a look": {
+      "main": [
+        [
+          {
+            "node": "Log: needs review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare CRM records": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: find contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: find contact": {
+      "main": [
+        [
+          {
+            "node": "Prepare contact save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare contact save": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: save contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: save contact": {
+      "main": [
+        [
+          {
+            "node": "Remember contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember contact": {
+      "main": [
+        [
+          {
+            "node": "Deal to reuse?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deal to reuse?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: add note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: create deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: create deal": {
+      "main": [
+        [
+          {
+            "node": "Remember deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember deal": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: add note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: add note": {
+      "main": [
+        [
+          {
+            "node": "Draft needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft needed?": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Slack?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gmail draft": {
+      "main": [
+        [
+          {
+            "node": "Remember draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember draft": {
+      "main": [
+        [
+          {
+            "node": "Alert Slack?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Slack?": {
+      "main": [
+        [
+          {
+            "node": "Lead Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log: processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Slack message": {
+      "main": [
+        [
+          {
+            "node": "Slack: lead alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: lead alert": {
+      "main": [
+        [
+          {
+            "node": "Log: processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadIntakeErrs01",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}
