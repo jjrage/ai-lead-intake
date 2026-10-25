@@ -1,0 +1,178 @@
+{
+  "id": "LeadAsstErrs0001",
+  "name": "Assistant · Errors",
+  "description": "Releases the conversation a failed run held and alerts Slack.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Errors\nRuns when any Assistant workflow fails (after the per-node retries). Releases the conversation the failed run was answering, so the next message gets a reply, and posts to Slack.",
+        "height": 160,
+        "width": 760,
+        "color": 6
+      },
+      "id": "7f6f8fb9-bfd6-4b9a-a1f3-ea7bf0e3a52d",
+      "name": "Note: errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "5ea4c83a-5ce4-4bcd-ab50-3a2bfa93d4a6",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8bd174bf-6fe0-4347-ae5f-609a7e13c81c",
+              "name": "slack_channel",
+              "value": "C0CCMJZMVSL",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5c471c8a-b2e0-45b1-ae1f-746e858b6dbd",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.conversations SET turn_started_at = NULL, turn_execution = NULL, updated_at = now()\nWHERE turn_execution = $1 RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ String($('On workflow error').first().json.execution?.id ?? '') ] }}"
+        }
+      },
+      "id": "217f1735-48ab-4794-a9fe-07f0ec310a80",
+      "name": "Release turn",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $('On workflow error').first().json;\nconst released = $input.all().map((i) => i.json.id).filter(Boolean);\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst title = `⚠️ Assistant failed: ${e.workflow?.name ?? 'workflow'}`;\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150) } },\n  { type: 'section', text: { type: 'mrkdwn', text: `*${esc(e.execution?.lastNodeExecuted ?? 'unknown step')}:* ${esc(e.execution?.error?.message ?? 'unknown error')}` } },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: released.length ? `Conversation #${released.join(', #')} unlocked; the lead's next message starts a new turn.` : 'No conversation was locked by this run.' }] },\n];\nreturn [{ json: { channel: $('Config').first().json.slack_channel, text: title, blocks } }];\n"
+      },
+      "id": "063e0dca-e947-49b1-a0e4-fccdb020f439",
+      "name": "Error Slack message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "3488e8bc-1344-4532-a8f6-c3498c2d608c",
+      "name": "Slack: error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "On workflow error": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Release turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release turn": {
+      "main": [
+        [
+          {
+            "node": "Error Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Slack message": {
+      "main": [
+        [
+          {
+            "node": "Slack: error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

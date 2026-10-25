@@ -1,0 +1,9 @@
+{
+  "note": "Assistant models compared on the conversation scenarios, and the model that plays the lead. Request settings and prices live in core/model-request.mjs, so the eval sends exactly what the n8n workflow sends.",
+  "candidates": [
+    { "variant": "gemini-flash", "label": "Gemini 3.8 Flash (thinking low)", "provider": "gemini", "model": "gemini-3.8-flash" },
+    { "variant": "claude-opus", "label": "Claude Opus 5.5 (effort low)", "provider": "claude", "model": "claude-opus-5-5" },
+    { "variant": "claude-haiku", "label": "Claude Haiku 5.5 (effort low)", "provider": "claude", "model": "claude-haiku-5-5" }
+  ],
+  "lead_simulator": { "provider": "claude", "model": "claude-haiku-5-5" }
+}

@@ -1,0 +1,505 @@
+{
+  "id": "LeadAsstCrmGhl01",
+  "name": "Assistant · CRM (GoHighLevel)",
+  "description": "Keeps the GoHighLevel contact, opportunity and transcript note in step with the conversation.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Keep GoHighLevel up to date\nCalled by **Assistant · CRM** when the business profile lists `gohighlevel` in `crm.providers` (and the person has given a phone number or email). Contact: upserted, so GoHighLevel matches it by email or phone and never duplicates it. Opportunity: upserted per contact in the profile's pipeline, at the stage that follows the conversation (stage names in the profile). Note: one per conversation, rewritten with the summary, the details and the transcript. API v2 with a Private Integration token.",
+        "height": 220,
+        "width": 1500,
+        "color": 6
+      },
+      "id": "2b0fd9b2-4861-47f6-a949-75d11beef89e",
+      "name": "Note: crm ghl",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c36cf140-3abf-4a3d-ad39-dd2058d27514",
+      "name": "When called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The person, their conversation and its transcript (every channel), for the CRM record.\nWITH conv AS (SELECT * FROM assistant.conversations WHERE id = $1::bigint),\nct AS (SELECT c.* FROM assistant.contacts c JOIN conv ON c.id = conv.contact_id)\nSELECT (SELECT row_to_json(ct) FROM ct) AS contact,\n       (SELECT row_to_json(conv) FROM conv) AS conversation,\n       (SELECT coalesce(json_agg(t ORDER BY t.sent_at, t.id), '[]') FROM (\n          SELECT m.id, m.author, m.channel, m.text, m.sent_at\n          FROM assistant.messages m JOIN assistant.conversations v ON v.id = m.conversation_id\n          WHERE v.contact_id = (SELECT id FROM ct) AND m.status IN ('received', 'sent')\n          ORDER BY m.sent_at DESC, m.id DESC LIMIT 60) t) AS messages,\n       (SELECT result->>'summary' FROM assistant.ai_calls WHERE conversation_id = $1::bigint AND ok ORDER BY id DESC LIMIT 1) AS summary,\n       (SELECT coalesce(sum(cost_usd), 0) FROM assistant.ai_calls WHERE conversation_id = $1::bigint) AS ai_cost_usd",
+        "options": {
+          "queryReplacement": "={{ [ $json.conversation_id ] }}"
+        }
+      },
+      "id": "1d11384b-4136-41a7-a677-4ad8322263c4",
+      "name": "Load lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ '/home/node/.n8n-files/profiles/' + $json.contact.profile + '.json' }}",
+        "options": {}
+      },
+      "id": "1ab738fe-9578-49e3-ac2b-332de181eb88",
+      "name": "Read profile",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "data",
+        "destinationKey": "text",
+        "options": {}
+      },
+      "id": "1312dcba-77b9-4913-ae4c-f9f05077d1b8",
+      "name": "Read profile text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function crmRecord(row, profile) {\n  const CHANNELS = { telegram: 'Telegram', whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', web_chat: 'Website chat', email: 'Email', web_form: 'Website form', lead_ads: 'Facebook lead form' };\n  const c = row.contact;\n  const facts = c.facts ?? {};\n  const [first, ...rest] = String(c.name ?? '').trim().split(/\\s+/).filter(Boolean);\n  // \"$650k\", \"$400k-$500k\", \"1.2M\": the top of the stated range.\n  const amounts = String(facts.budget ?? '').toLowerCase().replace(/,/g, '').match(/\\d+(?:\\.\\d+)?\\s*[km]?/g) ?? [];\n  const values = amounts.map((a) => parseFloat(a) * (a.endsWith('m') ? 1e6 : a.endsWith('k') ? 1e3 : 1)).filter((n) => n >= 1000);\n  const intent = profile.intents[facts.intent]?.label ?? 'New inquiry';\n  // A seller's deal is about the home they sell; anyone else's, about where they want to be.\n  const place = facts.intent === 'sell' ? (facts.property_area ?? facts.area) : (facts.area ?? facts.property_area);\n  const time = (t) => new Intl.DateTimeFormat('en-US', { timeZone: profile.business.timezone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t));\n  const who = { lead: c.name || 'Lead', ai: profile.assistant.name, human: 'Team' };\n  return {\n    first_name: first ?? null,\n    last_name: rest.join(' ') || null,\n    intent,\n    deal_name: `${c.name || 'Lead'} – ${intent}${place ? `, ${place}` : ''}`.slice(0, 200),\n    amount: values.length && facts.intent !== 'rent' ? Math.max(...values) : null,\n    details: Object.entries(facts).filter(([k]) => k !== 'intent').map(([k, v]) => [k.replace(/_/g, ' '), String(v)]),\n    channels: [...new Set(row.messages.map((m) => CHANNELS[m.channel] ?? m.channel))],\n    transcript: row.messages.map((m) => ({ time: time(m.sent_at), who: who[m.author] ?? m.author, text: m.text })),\n  };\n}\n\n// Contact, opportunity and transcript note for GoHighLevel, from what the assistant has learned\n// (crmRecord() in core/assistant.mjs, shared with the HubSpot adapter). GoHighLevel notes are plain text.\nconst profile = JSON.parse($('Read profile text').first().json.text);\nconst ghl = profile.crm.gohighlevel;\nconst row = $('Load lead').first().json;\nconst c = row.contact;\nconst r = crmRecord(row, profile);\n\nconst contact = { locationId: ghl.location_id, source: 'AI Lead Assistant', tags: ['ai-assistant', ...r.channels.map((ch) => ch.toLowerCase())] };\nfor (const [k, v] of Object.entries({ firstName: r.first_name, lastName: r.last_name, email: c.email, phone: c.phone })) if (v) contact[k] = v;\nconst opportunity = { name: r.deal_name, status: c.stage === 'lost' ? 'lost' : 'open' };\nif (r.amount) opportunity.monetaryValue = r.amount;\n\nconst note = [\n  `${c.is_hot ? '🔥 Hot lead. ' : ''}${row.summary ?? 'Conversation with the assistant.'}`,\n  '',\n  `Wants: ${r.intent}`,\n  ...r.details.map(([k, v]) => `${k}: ${v}`),\n  `Stage: ${c.stage}`,\n  ...(c.opted_out_at ? ['Asked not to be contacted'] : []),\n  ...(row.conversation.mode === 'human' ? [`Handled by the team: ${row.conversation.handoff_reason ?? ''}`] : []),\n  '',\n  `Conversation (${r.channels.join(', ')}):`,\n  ...r.transcript.map((m) => `[${m.time}] ${m.who}: ${m.text}`),\n  '',\n  `AI Lead Assistant · conversation #${row.conversation.id} · AI cost $${Number(row.ai_cost_usd).toFixed(4)}`,\n].join('\\n');\n\nreturn [{ json: { contact, opportunity, pipeline: ghl.pipeline, stage: ghl.stages[c.stage] ?? ghl.stages.new, location_id: ghl.location_id, note, note_id: row.conversation.crm_refs?.gohighlevel_note ?? null } }];\n"
+      },
+      "id": "31c548f3-3852-4eeb-ab39-d4267c890f14",
+      "name": "Prepare GoHighLevel records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://services.leadconnectorhq.com/opportunities/pipelines?locationId=' + $json.location_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "d502abb5-3145-49f9-a835-52a79e7706d7",
+      "name": "GoHighLevel: pipelines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "laCredGhlToken01",
+          "name": "GoHighLevel token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/contacts/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Prepare GoHighLevel records').first().json.contact }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "ad312664-1e20-485d-a75a-650c56ca0a31",
+      "name": "GoHighLevel: save contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "laCredGhlToken01",
+          "name": "GoHighLevel token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/opportunities/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { ...$('Prepare GoHighLevel records').first().json.opportunity, locationId: $('Prepare GoHighLevel records').first().json.location_id, contactId: $json.contact.id, pipelineId: $('GoHighLevel: pipelines').first().json.pipelines.find((p) => p.name === $('Prepare GoHighLevel records').first().json.pipeline).id, pipelineStageId: $('GoHighLevel: pipelines').first().json.pipelines.find((p) => p.name === $('Prepare GoHighLevel records').first().json.pipeline).stages.find((s) => s.name === $('Prepare GoHighLevel records').first().json.stage).id } }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "535be1f4-81bd-4d04-ae1d-379c21df60b8",
+      "name": "GoHighLevel: save opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "laCredGhlToken01",
+          "name": "GoHighLevel token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9ae45ef5-fb6b-d8e7-e73f-96163527554b",
+              "leftValue": "={{ !!$('Prepare GoHighLevel records').first().json.note_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "326cb558-9dd4-40fc-aab7-fe281a7840eb",
+      "name": "Note in GoHighLevel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://services.leadconnectorhq.com/contacts/' + $('GoHighLevel: save contact').first().json.contact.id + '/notes/' + $('Prepare GoHighLevel records').first().json.note_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { body: $('Prepare GoHighLevel records').first().json.note } }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "b1178b92-7891-463f-a56b-959dd2d60de1",
+      "name": "GoHighLevel: update note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        -120
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "laCredGhlToken01",
+          "name": "GoHighLevel token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://services.leadconnectorhq.com/contacts/' + $('GoHighLevel: save contact').first().json.contact.id + '/notes' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { body: $('Prepare GoHighLevel records').first().json.note } }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "86e6debe-104d-4a56-af2f-a4d1bfe03215",
+      "name": "GoHighLevel: create note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "laCredGhlToken01",
+          "name": "GoHighLevel token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.conversations SET crm_refs = crm_refs || jsonb_build_object('gohighlevel_note', $2::text) WHERE id = $1::bigint RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, String($json.note?.id ?? '') ] }}"
+        }
+      },
+      "id": "7ec6e7a8-316f-48b4-aa15-cccf1fffa9c3",
+      "name": "Remember note",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2200,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When called": {
+      "main": [
+        [
+          {
+            "node": "Load lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load lead": {
+      "main": [
+        [
+          {
+            "node": "Read profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read profile": {
+      "main": [
+        [
+          {
+            "node": "Read profile text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read profile text": {
+      "main": [
+        [
+          {
+            "node": "Prepare GoHighLevel records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare GoHighLevel records": {
+      "main": [
+        [
+          {
+            "node": "GoHighLevel: pipelines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoHighLevel: pipelines": {
+      "main": [
+        [
+          {
+            "node": "GoHighLevel: save contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoHighLevel: save contact": {
+      "main": [
+        [
+          {
+            "node": "GoHighLevel: save opportunity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoHighLevel: save opportunity": {
+      "main": [
+        [
+          {
+            "node": "Note in GoHighLevel?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Note in GoHighLevel?": {
+      "main": [
+        [
+          {
+            "node": "GoHighLevel: update note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GoHighLevel: create note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoHighLevel: create note": {
+      "main": [
+        [
+          {
+            "node": "Remember note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

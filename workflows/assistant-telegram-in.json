@@ -1,0 +1,155 @@
+{
+  "id": "LeadAsstTgIn0001",
+  "name": "Assistant · Telegram in",
+  "description": "Receives Telegram direct messages and hands them to Ingest message.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Telegram\nThe bot's direct messages. Each one is turned into the common message format and stored by **Ingest message**; the reply comes from **Reply turn**. Telegram registers this webhook when the workflow is published.",
+        "height": 180,
+        "width": 860,
+        "color": 6
+      },
+      "id": "1833371f-f8e3-4939-abad-4d0b4e8d7e78",
+      "name": "Note: telegram",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "1be329c3-7ec9-4d9e-a107-74614f40599d",
+      "name": "Telegram message",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "laCredTelegram01",
+          "name": "Telegram bot"
+        }
+      },
+      "webhookId": "baa0daaf-e9e0-481c-a6c3-e66acde516f7"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9f84e232-5784-4e87-a663-5d37ffee49eb",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A Telegram update becomes the common inbound message (see assistant.ingest in db/migrations).\nconst profile = $('Config').first().json.profile;\nconst out = [];\nfor (const item of $('Telegram message').all()) {\n  const m = item.json.message;\n  if (!m || m.chat?.type !== 'private' || m.from?.is_bot) continue;  // direct chats with people only\n  const from = m.from ?? {};\n  const attachments = [];\n  if (m.photo) attachments.push({ type: 'image', file_id: m.photo.at(-1).file_id });\n  if (m.document) attachments.push({ type: 'file', file_id: m.document.file_id, name: m.document.file_name ?? null });\n  if (m.voice || m.audio) attachments.push({ type: 'audio', file_id: (m.voice ?? m.audio).file_id });\n  if (m.video) attachments.push({ type: 'video', file_id: m.video.file_id });\n  let text = String(m.text ?? m.caption ?? '').trim();\n  if (/^\\/start\\b/.test(text)) text = '(opened the chat)';\n  // A contact shared with Telegram's own button is the sender's verified phone number.\n  const shared = m.contact && m.contact.user_id === from.id ? m.contact : null;\n  const phone = shared ? `+${String(shared.phone_number).replace(/\\D/g, '')}` : null;\n  if (shared && !text) text = `(shared their phone number: ${phone})`;\n  if (!text && attachments.length) text = `(sent ${attachments.map((a) => a.type).join(', ')})`;\n  if (!text) continue;\n  out.push({ json: {\n    profile,\n    channel: 'telegram',\n    external_user_id: String(m.chat.id),\n    external_message_id: `${m.chat.id}:${m.message_id}`,\n    sent_at: new Date(m.date * 1000).toISOString(),\n    text,\n    attachments,\n    sender: { display_name: [from.first_name, from.last_name].filter(Boolean).join(' ') || null, username: from.username ?? null, phone, email: null },\n    address: { chat_id: m.chat.id },\n  } });\n}\nreturn out;\n"
+      },
+      "id": "3ca7394b-f0fc-4bf2-a62d-f53bbdc54310",
+      "name": "Normalize message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstIngest01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "8fd94641-b6cc-4b79-a668-ed8d0248bb46",
+      "name": "Ingest message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram message": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize message": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

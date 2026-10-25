@@ -1,0 +1,164 @@
+{
+  "id": "LeadAsstIgIn0001",
+  "name": "Assistant · Instagram in",
+  "description": "Receives Instagram direct messages and hands them to Ingest message.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Instagram\nDirect messages to the Instagram professional account linked to the Facebook Page (Messenger API for Instagram, Page token). When the workflow is published, the trigger subscribes the Meta app to Instagram events (`messages`, `messaging_postbacks`) and checks each event's signature with the app secret. Each message is turned into the common format and stored by **Ingest message**; the reply comes from **Reply turn**.",
+        "height": 200,
+        "width": 900,
+        "color": 6
+      },
+      "id": "726dd471-2d1e-48cc-aaad-f66b49533538",
+      "name": "Note: instagram",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "appId": "2984455028584012",
+        "object": "instagram",
+        "fields": [
+          "messages",
+          "messaging_postbacks"
+        ],
+        "options": {}
+      },
+      "id": "0d982081-dc9b-4c05-a4f2-cfdf8616790e",
+      "name": "Meta Trigger",
+      "type": "n8n-nodes-base.facebookTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "facebookGraphAppApi": {
+          "id": "laCredMetaApp001",
+          "name": "Meta app (webhooks)"
+        }
+      },
+      "webhookId": "b8bed8a3-d154-4f6a-a3f6-270df0bfd349"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            },
+            {
+              "id": "56a3e728-2393-4dfd-aea9-50e4cf4b3604",
+              "name": "channel",
+              "value": "instagram",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fea28162-46c4-4945-a4e2-31025a0661bb",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A Messenger or Instagram webhook entry becomes the common inbound message. Both use the same\n// format; the person is keyed by their page- or Instagram-scoped id, and neither shares a phone or\n// email. A tapped conversation starter arrives as a postback with the starter's text.\nconst { profile, channel } = $('Config').first().json;\nconst out = [];\nfor (const item of $('Meta Trigger').all()) {\n  for (const e of item.json.messaging ?? []) {\n    const m = e.message;\n    const pb = e.postback;\n    if ((!m && !pb) || m?.is_echo || m?.is_deleted) continue;  // echoes of our own replies, deletions\n    const attachments = (m?.attachments ?? []).filter((a) => a.type !== 'fallback').map((a) => ({ type: a.type === 'file' ? 'file' : a.type, url: a.payload?.url ?? null }));\n    let text = String(m?.text ?? pb?.title ?? '').trim();\n    if (m?.is_unsupported) text = '(sent a message type the assistant cannot read)';\n    if (!text && attachments.length) text = `(sent ${attachments.map((a) => a.type).join(', ')})`;\n    if (!text) continue;\n    out.push({ json: {\n      profile,\n      channel,\n      external_user_id: e.sender.id,\n      external_message_id: m?.mid ?? pb?.mid ?? `${e.sender.id}:${e.timestamp}`,\n      sent_at: new Date(e.timestamp).toISOString(),\n      text,\n      attachments,\n      sender: { display_name: null, username: null, phone: null, email: null },\n      address: { user_id: e.sender.id, account_id: e.recipient.id },\n    } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "5dd582a3-571b-4214-ad7f-1ecf83794f4a",
+      "name": "Normalize message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstIngest01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "56e62046-1adb-4301-aee8-c6d7a87690f4",
+      "name": "Ingest message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Meta Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize message": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

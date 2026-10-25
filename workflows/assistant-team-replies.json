@@ -1,0 +1,697 @@
+{
+  "id": "LeadAsstTeam0001",
+  "name": "Assistant · Team replies (Slack)",
+  "description": "Sends team replies from Slack threads to the lead and hands conversations back to the assistant.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## The team in Slack\nEach conversation has a thread in #leads. A team member's reply in the thread goes to the lead on their channel and pauses the assistant for that conversation (`assistant.team_reply`). Replying `!ai`, or reacting ✅ to the thread's first message, hands it back. Messages starting with `//` stay internal. After a meeting the assistant asks whether it happened: 👍 or 👎 on that post sets the lead's stage (Showed / No-show) and, for a no-show, has the assistant offer another time. Slack signs every event; the trigger checks the signature.",
+        "height": 220,
+        "width": 1100,
+        "color": 6
+      },
+      "id": "15bf9a67-502a-4aaf-affe-6a803e11dfb1",
+      "name": "Note: team",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "trigger": [
+          "message",
+          "reaction_added"
+        ],
+        "watchWorkspace": false,
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "C0CCMJZMVSL"
+        },
+        "options": {}
+      },
+      "id": "8b8f1f22-0284-429a-a4cb-14ca6e2db640",
+      "name": "Slack event",
+      "type": "n8n-nodes-base.slackTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "webhookId": "b77e8f07-bcd5-41ff-a91f-98657946d828"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keeps only what the team does in a conversation's thread: a reply for the lead, a hand-back to\n// the assistant (\"!ai\" in the thread, or ✅ on the thread's first message), or whether a meeting\n// happened (👍 or 👎 on the assistant's question after it). Messages starting with \"//\" are the\n// team talking among themselves and are not sent.\nconst e = $input.first().json;\nconst ignore = [{ json: { kind: 'ignore' } }];\nif (e.type === 'reaction_added') {\n  if (e.item?.type !== 'message') return ignore;\n  const reaction = String(e.reaction ?? '').split('::')[0];  // \"+1::skin-tone-3\" is 👍 too\n  if (reaction === 'white_check_mark') return [{ json: { kind: 'handback', thread: e.item.ts, user: e.user } }];\n  if (['+1', 'thumbsup', '-1', 'thumbsdown'].includes(reaction)) {\n    return [{ json: { kind: 'outcome', post: e.item.ts, outcome: ['+1', 'thumbsup'].includes(reaction) ? 'done' : 'no_show', user: e.user } }];\n  }\n  return ignore;\n}\nif (e.type !== 'message' || e.bot_id || e.subtype || !e.thread_ts || e.thread_ts === e.ts) return ignore;\n// Slack markup to plain text: mentions dropped, links as their label, entities decoded.\nconst text = String(e.text ?? '')\n  .replace(/<@[A-Z0-9]+>/g, '')\n  .replace(/<(https?:[^|>]+)\\|([^>]+)>/g, '$2 ($1)')\n  .replace(/<(https?:[^>]+)>/g, '$1')\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')\n  .trim();\nif (/^!ai\\b/i.test(text)) return [{ json: { kind: 'handback', thread: e.thread_ts, user: e.user } }];\nif (!text || text.startsWith('//')) return ignore;\nreturn [{ json: { kind: 'reply', thread: e.thread_ts, text, ts: e.ts, user: e.user } }];\n"
+      },
+      "id": "81aa7f32-e865-4592-a594-e993fbdc0e15",
+      "name": "What did the team do?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "556d2bdb-710b-4cbe-b0c0-debb37c70696",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Reply to the lead"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "fad0fd99-b667-3694-9b6e-c2c805525446",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "handback",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Hand back"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0441fba4-7ded-a67c-c083-99fa972a7ae2",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "outcome",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Meeting outcome"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "ee06afb5-d9f1-4114-a1d7-56cbe9cc4f21",
+      "name": "Kind",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.team_reply($1, $2, $3, $4) AS r",
+        "options": {
+          "queryReplacement": "={{ [ $('What did the team do?').first().json.thread, $('What did the team do?').first().json.text, $('What did the team do?').first().json.ts, $('What did the team do?').first().json.user ] }}"
+        }
+      },
+      "id": "8a70c0ac-f702-41c8-aefb-c8686aedc8fa",
+      "name": "Save team reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bb43851c-12f5-fd43-4910-e7624e863e13",
+              "leftValue": "={{ $json.r.found && !$json.r.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d03bb5f4-df88-4f02-a003-18a58ac9c375",
+      "name": "New reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "904ec6a8-a852-466e-a9db-05e2487ea5a9",
+              "name": "message_id",
+              "value": "={{ $json.r.message_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3585dc11-ae78-448b-a1ed-ea53903dcc8f",
+      "name": "Reply message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstSend0001"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "73eeae7c-98a8-47c0-a7d8-889f18c62db1",
+      "name": "Send to lead",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a56a1f2f-439e-404c-d9ed-ac1d760c89ea",
+              "leftValue": "={{ $('Save team reply').first().json.r.took_over }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "00d0aa6f-6376-4519-a150-073f482c01eb",
+      "name": "Took over?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { channel: 'C0CCMJZMVSL', thread_ts: $('What did the team do?').first().json.thread, text: '🙋 <@' + $('What did the team do?').first().json.user + '> is answering now; the assistant is paused for this lead. Reply !ai (or react ✅ to the first message) to hand it back. Start a message with // to keep it internal.' } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "6cd82379-acae-4215-a28f-30929d251f44",
+      "name": "Slack: assistant paused",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -280
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.team_handback($1, $2) AS r",
+        "options": {
+          "queryReplacement": "={{ [ $('What did the team do?').first().json.thread, $('What did the team do?').first().json.user ] }}"
+        }
+      },
+      "id": "ce25dbe9-9a68-4a1d-a30a-d984d4227c7c",
+      "name": "Hand back",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "deec8a60-ad1f-74e3-d18e-ccdddeb5a0d7",
+              "leftValue": "={{ $json.r.changed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9a875875-736e-4520-a087-188adc2810de",
+      "name": "Handed back?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { channel: 'C0CCMJZMVSL', thread_ts: $('What did the team do?').first().json.thread, text: '🤖 The assistant is answering this lead again (handed back by <@' + $('What did the team do?').first().json.user + '>).' } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "d2c107bc-50c7-404e-ac8c-595f5619cb11",
+      "name": "Slack: assistant resumed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        60
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.booking_outcome(b.id, $2) AS r, b.label, b.agent, c.name\nFROM assistant.bookings b JOIN assistant.contacts c ON c.id = b.contact_id\nWHERE b.outcome_slack_ts = $1",
+        "options": {
+          "queryReplacement": "={{ [ $('What did the team do?').first().json.post, $('What did the team do?').first().json.outcome ] }}"
+        }
+      },
+      "id": "dbbdd998-ac48-45e9-ac86-f93588baaa9e",
+      "name": "Meeting outcome",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { channel: 'C0CCMJZMVSL', thread_ts: $('What did the team do?').first().json.post, text: $('What did the team do?').first().json.outcome === 'done' ? '👍 Marked: ' + ($json.name || 'the lead') + ' made it to the ' + $json.label.toLowerCase() + ' (stage Showed).' : '👎 Marked as a no-show (stage No-show). The assistant will offer ' + ($json.name || 'the lead') + ' another time.' } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "2b8a5dd1-ae91-492d-a583-2872f60b6fb6",
+      "name": "Slack: outcome noted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        340
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "291a2212-b887-40c7-acf7-3ed2cd72443a",
+              "name": "conversation_id",
+              "value": "={{ $('Meeting outcome').first().json.r.conversation_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bb265a0b-31e9-4ff7-a87a-637d8729b60c",
+      "name": "CRM input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstCrm00001"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "766826ef-704e-45a4-a873-5e0cd99c98b4",
+      "name": "Update CRM",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        340
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Slack event": {
+      "main": [
+        [
+          {
+            "node": "What did the team do?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "What did the team do?": {
+      "main": [
+        [
+          {
+            "node": "Kind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kind": {
+      "main": [
+        [
+          {
+            "node": "Save team reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hand back",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Meeting outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meeting outcome": {
+      "main": [
+        [
+          {
+            "node": "Slack: outcome noted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: outcome noted": {
+      "main": [
+        [
+          {
+            "node": "CRM input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM input": {
+      "main": [
+        [
+          {
+            "node": "Update CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save team reply": {
+      "main": [
+        [
+          {
+            "node": "New reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New reply?": {
+      "main": [
+        [
+          {
+            "node": "Reply message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply message": {
+      "main": [
+        [
+          {
+            "node": "Send to lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to lead": {
+      "main": [
+        [
+          {
+            "node": "Took over?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Took over?": {
+      "main": [
+        [
+          {
+            "node": "Slack: assistant paused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hand back": {
+      "main": [
+        [
+          {
+            "node": "Handed back?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handed back?": {
+      "main": [
+        [
+          {
+            "node": "Slack: assistant resumed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

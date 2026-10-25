@@ -1,0 +1,162 @@
+{
+  "id": "LeadAsstMaint001",
+  "name": "Assistant · Maintenance",
+  "description": "Hourly: forgets people inactive for the keeping period and removes stuck Website chat runs.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Maintenance (hourly)\n**Forget inactive people:** everyone who has not written or been written to for the keeping period in **Config** is deleted with everything stored about them (the privacy policy promises 30 days; HubSpot records stay until deleted there). People who only used the demo page's chat go after a day.\n**Remove stuck chat runs:** n8n leaves the Website chat's runs (which are not saved on success) marked as running; they are removed after 10 minutes.",
+        "height": 220,
+        "width": 900,
+        "color": 6
+      },
+      "id": "ed8c506d-81ee-4769-ae1c-b3789ffd2313",
+      "name": "Note: maintenance",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "fd1c97b8-9b59-40ae-a1f0-a11f63b7acf7",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "752c7cf9-7a9a-4aee-a9e7-5581d4085f85",
+              "name": "keep_idle_for",
+              "value": "30 days",
+              "type": "string"
+            },
+            {
+              "id": "283bb1c9-4fba-41dc-a3c1-36ffb198ea15",
+              "name": "keep_website_chat_for",
+              "value": "24 hours",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2f8f5be-a2fe-4289-a836-0871f0ce1b7e",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.forget_inactive($1::interval) AS forgotten,\n  (SELECT count(assistant.forget_contact(c.id)) FROM assistant.contacts c\n   WHERE c.merged_into IS NULL\n     AND EXISTS (SELECT 1 FROM assistant.identities i WHERE i.contact_id = c.id AND i.channel = 'web_chat')\n     AND NOT EXISTS (SELECT 1 FROM assistant.identities i WHERE i.contact_id = c.id AND i.channel <> 'web_chat')\n     AND NOT EXISTS (SELECT 1 FROM assistant.messages m JOIN assistant.conversations v ON v.id = m.conversation_id\n                     WHERE v.contact_id = c.id AND m.created_at > now() - $2::interval)) AS website_chat_forgotten",
+        "options": {
+          "queryReplacement": "={{ [ $json.keep_idle_for, $json.keep_website_chat_for ] }}"
+        }
+      },
+      "id": "76d69b4e-09e3-48af-addd-38bec8e5647b",
+      "name": "Forget inactive people",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH gone AS (\n  DELETE FROM public.execution_entity\n  WHERE \"workflowId\" = $1 AND status = 'running' AND \"startedAt\" < now() - interval '10 minutes'\n  RETURNING id\n) SELECT count(*) AS removed FROM gone",
+        "options": {
+          "queryReplacement": "={{ [ 'LeadAsstChat0001' ] }}"
+        }
+      },
+      "id": "d19cfb01-9a0f-4d92-a461-916aca107f9f",
+      "name": "Remove stuck chat runs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Forget inactive people",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget inactive people": {
+      "main": [
+        [
+          {
+            "node": "Remove stuck chat runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

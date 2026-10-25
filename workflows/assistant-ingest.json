@@ -1,0 +1,342 @@
+{
+  "id": "LeadAsstIngest01",
+  "name": "Assistant · Ingest message",
+  "description": "Stores one inbound message (any channel) and starts a reply turn.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Ingest one message\nEvery channel calls this with the same message format. `assistant.ingest()` stores it once (a redelivered webhook is a duplicate), finds the person by channel id, phone or email, and opens their conversation. Then **Reply turn** starts in the background: it waits a few seconds so a burst of short messages gets one answer.\n**Demo only:** `/reset` on any channel forgets the sender (`assistant.forget_contact()`, CRM untouched) and starts over, so people trying the demo can run it again. Remove **Start over?** for a real business.",
+        "height": 220,
+        "width": 1700,
+        "color": 6
+      },
+      "id": "a89d176c-1c30-4c45-a33c-53723feb7d13",
+      "name": "Note: ingest",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -440
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "17d1f1ba-253a-46b2-ac58-6096af8c43ce",
+      "name": "When called by a channel",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "65d85c3e-0adc-3dbe-5f1c-4c9517df9898",
+              "leftValue": "={{ String($json.text ?? '').trim().toLowerCase() === '/reset' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "c73d6b16-adaa-456f-a5b2-bbf87c6d1dd7",
+      "name": "Start over?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(assistant.forget_contact(contact_id)) AS forgotten FROM assistant.identities WHERE profile = $1 AND channel = $2 AND external_id = $3",
+        "options": {
+          "queryReplacement": "={{ [ $json.profile, $json.channel, $json.external_user_id ] }}"
+        }
+      },
+      "id": "0d638829-eea4-47da-a630-56c8941317f1",
+      "name": "Forget the sender",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        -160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// The sender is forgotten; their \"/reset\" opens a new conversation, like a first visit.\nreturn $('When called by a channel').all().map((item) => ({ json: { ...item.json, text: '(opened the chat)' } }));\n"
+      },
+      "id": "f20f34b5-7dc3-47e0-abd1-9448233f3b1b",
+      "name": "Start fresh",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.ingest($1::jsonb) AS r",
+        "options": {
+          "queryReplacement": "={{ [ $json ] }}"
+        }
+      },
+      "id": "521b3f3b-8a8a-47c0-a7fa-c91657974957",
+      "name": "Store message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c5e3b4ea-b18f-09d2-206b-6d646d36a82a",
+              "leftValue": "={{ !$json.r.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0d5a8835-203f-42a5-aa9c-27a574308e25",
+      "name": "New message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1c33ab80-4e0f-416e-ac5a-f708c732e641",
+              "name": "conversation_id",
+              "value": "={{ $json.r.conversation_id }}",
+              "type": "number"
+            },
+            {
+              "id": "904ec6a8-a852-466e-a9db-05e2487ea5a9",
+              "name": "message_id",
+              "value": "={{ $json.r.message_id }}",
+              "type": "number"
+            },
+            {
+              "id": "ee96e5dc-5d83-496f-aa20-04b6f907f897",
+              "name": "debounce",
+              "value": "={{ true }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5f070212-155d-4495-a035-b03e911dd80f",
+      "name": "Turn input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1320,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstTurn0001"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "381103b7-964e-4f61-a56f-5ce90d2dc86d",
+      "name": "Start reply turn",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -100
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "bafd3c1c-2d47-40b7-aed0-b45d9eba20e3",
+      "name": "Duplicate: skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "When called by a channel": {
+      "main": [
+        [
+          {
+            "node": "Start over?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start over?": {
+      "main": [
+        [
+          {
+            "node": "Forget the sender",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forget the sender": {
+      "main": [
+        [
+          {
+            "node": "Start fresh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start fresh": {
+      "main": [
+        [
+          {
+            "node": "Store message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store message": {
+      "main": [
+        [
+          {
+            "node": "New message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New message?": {
+      "main": [
+        [
+          {
+            "node": "Turn input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Duplicate: skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Turn input": {
+      "main": [
+        [
+          {
+            "node": "Start reply turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

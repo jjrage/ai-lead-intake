@@ -1,0 +1,163 @@
+{
+  "id": "LeadAsstMailIn01",
+  "name": "Assistant · Email in",
+  "description": "Polls the agency inbox and hands each new email to Ingest message.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Email\nChecks the agency inbox every minute (Gmail, not mail sent from it). Each new email is turned into the common format (new text only, without the quoted history) and stored by **Ingest message**; the same email is never stored twice. The reply is saved as a Gmail **draft** in the same thread for a person to review and send (see Send message).",
+        "height": 200,
+        "width": 900,
+        "color": 6
+      },
+      "id": "634c3ee8-1424-4631-a2ec-bc227f1e8eda",
+      "name": "Note: email",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "in:inbox -from:me -category:promotions -category:social",
+          "readStatus": "both"
+        },
+        "options": {}
+      },
+      "id": "ad7b7686-f88e-46e0-abc3-996c20c56454",
+      "name": "New email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "921619db-7040-49ca-a68a-73d78912c2a8",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// An email to the agency inbox becomes the common inbound message: the new text only (quoted\n// history and signature cut), with the subject when it starts a conversation. The person is keyed\n// by their address; replies go back into the same Gmail thread.\nconst profile = $('Config').first().json.profile;\nconst out = [];\nfor (const item of $('New email').all()) {\n  const m = item.json;\n  const from = m.from?.value?.[0] ?? {};\n  const address = String(from.address ?? '').toLowerCase();\n  const subject = String(m.subject ?? '').trim();\n  // Automatic mail is not a lead.\n  // \"noreply@\", and also \"noreply-accounts@\", \"no_reply.alerts@\" and the like.\n  if (!address || /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer-daemon|postmaster|notifications?)([-_.+][^@]*)?@/i.test(address)) continue;\n  if (/^(automatic reply|auto(matic)?[- ]?reply|out of (the )?office|undeliverable|delivery status)/i.test(subject)) continue;\n  const raw = String(m.text ?? '').trim() || String(m.html ?? '').replace(/<[^>]+>/g, ' ').replace(/[ \\t]+/g, ' ').trim();\n  const kept = [];\n  const lines = raw.replace(/\\r/g, '').split('\\n');\n  for (let i = 0; i < lines.length; i++) {\n    const line = lines[i].trim();\n    if (line === '--' || line === '-- ' || /^-{2,}\\s*Original Message/i.test(line)) break;\n    if (/^On .+/.test(line) && /wrote:\\s*$/.test(`${line} ${lines[i + 1] ?? ''}`)) break;\n    if (/^From: /.test(line) && kept.length) break;\n    if (line.startsWith('>')) continue;\n    kept.push(lines[i]);\n  }\n  const textBody = kept.join('\\n').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, 4000);\n  const startsThread = !/^(re|fwd?):/i.test(subject);\n  const text = startsThread && subject ? `Subject: ${subject}\\n\\n${textBody}` : textBody;\n  if (!text) continue;\n  out.push({ json: {\n    profile,\n    channel: 'email',\n    external_user_id: address,\n    external_message_id: m.id,\n    sent_at: m.date ? new Date(m.date).toISOString() : new Date().toISOString(),\n    text,\n    attachments: (m.attachments ?? []).map((a) => ({ type: 'file', name: a.filename ?? null })),\n    sender: { display_name: from.name || null, username: null, phone: null, email: address },\n    address: { email: address, thread_id: m.threadId, subject: subject.replace(/^(re|fwd?):\\s*/i, '') },\n  } });\n}\nreturn out;\n"
+      },
+      "id": "32210af1-d108-427c-aba9-ee8347ef7712",
+      "name": "Normalize email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstIngest01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "c335ec50-3b8e-47c1-ae44-3e54a55bbc3c",
+      "name": "Ingest message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "New email": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize email": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

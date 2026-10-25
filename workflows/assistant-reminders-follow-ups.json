@@ -1,0 +1,552 @@
+{
+  "id": "LeadAsstTouch001",
+  "name": "Assistant · Reminders and follow-ups",
+  "description": "Every 10 minutes: meeting reminders, follow-ups to quiet leads, and the check after a meeting.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Reminders and follow-ups (every 10 minutes)\nMessages the assistant sends on its own, on the channel the lead last wrote from, through **Send message** (outside WhatsApp's 24-hour window as an approved template; on Messenger a reminder goes with the event-update tag). Each is claimed in the database before it is sent, so none goes twice.\n- **Reminders**: a day before a meeting booked more than a day ahead, and an hour before.\n- **Follow-ups**: when the lead went quiet after the assistant's message: the first repeats the open question (inside WhatsApp's 24 hours), the last one says how to stop. Only while the assistant handles the conversation, before a booking, in the business's daytime; never after an opt-out. Timing: `follow_up.after_hours` in the profile.\n- **After a meeting**: the team is asked in Slack whether it happened (👍 / 👎, see Team replies); after a no-show the lead is offered another time.",
+        "height": 300,
+        "width": 1900,
+        "color": 6
+      },
+      "id": "af50eaf8-eec6-4dd2-a792-8ba565aa2a5a",
+      "name": "Note: touches",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "fff9d44d-7e28-4765-a91f-538c2c895be8",
+      "name": "Every 10 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            },
+            {
+              "id": "8bd174bf-6fe0-4347-ae5f-609a7e13c81c",
+              "name": "slack_channel",
+              "value": "C0CCMJZMVSL",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10c81eda-213a-4fd3-a3c4-091e9d6b6de1",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ '/home/node/.n8n-files/profiles/' + $json.profile + '.json' }}",
+        "options": {}
+      },
+      "id": "398ee222-ec68-4ae2-ad1c-a734b515a994",
+      "name": "Read profile",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "data",
+        "destinationKey": "text",
+        "options": {}
+      },
+      "id": "072ae147-4ac9-4734-a711-1f9ecbdc7c67",
+      "name": "Profile text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// What the touches need from the business profile: its time zone (follow-ups go in its daytime\n// only) and when follow-ups go (hours after the lead's last message, one per touch).\nconst profile = JSON.parse($input.first().json.text);\nreturn [{ json: { profile, timezone: profile.business.timezone, follow_up_hours: profile.follow_up?.after_hours ?? [20, 72] } }];\n"
+      },
+      "id": "7ba74d06-3c2b-41b7-a3d5-f88ac7a97693",
+      "name": "Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Reminders due now, each claimed once: a day before a meeting booked more than a day ahead, and an\n-- hour before one booked at least 90 minutes ahead.\nWITH day AS (\n  UPDATE assistant.bookings SET reminded_24h_at = now(), updated_at = now()\n  WHERE status = 'booked' AND reminded_24h_at IS NULL AND starts_at <= now() + interval '24 hours'\n    AND starts_at > now() + interval '2 hours' AND created_at < starts_at - interval '24 hours'\n  RETURNING id, 'reminder_24h' AS kind\n), hour AS (\n  UPDATE assistant.bookings SET reminded_1h_at = now(), updated_at = now()\n  WHERE status = 'booked' AND reminded_1h_at IS NULL AND starts_at <= now() + interval '1 hour'\n    AND starts_at > now() AND created_at < starts_at - interval '90 minutes'\n  RETURNING id, 'reminder_1h' AS kind\n)\nSELECT k.kind, b.conversation_id, b.label AS meeting, b.agent, b.starts_at AS start, c.name,\n       coalesce(c.language, 'en') AS language, c.facts->>'intent' AS intent\nFROM (SELECT * FROM day UNION ALL SELECT * FROM hour) k\nJOIN assistant.bookings b ON b.id = k.id\nJOIN assistant.contacts c ON c.id = b.contact_id\nWHERE c.opted_out_at IS NULL AND b.conversation_id IS NOT NULL",
+        "options": {
+          "queryReplacement": "={{ [] }}"
+        }
+      },
+      "id": "dc1e2ee1-cc9f-49b6-ab7b-a846c817091c",
+      "name": "Due reminders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Leads who went quiet after the assistant's message, each touch claimed once (follow_ups counts the\n-- touches since the lead last wrote). Touch n goes $1[n] hours after the lead's last message.\nWITH quiet AS (\n  SELECT v.id,\n         CASE WHEN v.followed_up_at > v.last_inbound_at THEN v.follow_ups ELSE 0 END AS done,\n         (SELECT m.channel FROM assistant.messages m WHERE m.conversation_id = v.id AND m.direction = 'in'\n          ORDER BY m.sent_at DESC, m.id DESC LIMIT 1) AS channel\n  FROM assistant.conversations v JOIN assistant.contacts c ON c.id = v.contact_id\n  WHERE v.status = 'open' AND v.mode = 'ai' AND c.opted_out_at IS NULL AND c.stage IN ('new', 'qualifying', 'qualified')\n    AND v.last_inbound_at IS NOT NULL AND v.last_outbound_at > v.last_inbound_at\n    AND extract(hour FROM now() AT TIME ZONE $2) BETWEEN 9 AND 18\n), touch AS (\n  UPDATE assistant.conversations v SET follow_ups = q.done + 1, followed_up_at = now()\n  FROM quiet q\n  WHERE v.id = q.id AND q.done < cardinality($1::int[])\n    AND v.last_inbound_at < now() - make_interval(hours => ($1::int[])[q.done + 1])\n    -- Messenger and Instagram allow messages only within 24 hours of the lead's last one.\n    AND (q.channel NOT IN ('messenger', 'instagram') OR ($1::int[])[q.done + 1] < 24)\n  RETURNING v.id, v.follow_ups\n)\nSELECT CASE WHEN t.follow_ups = cardinality($1::int[]) THEN 'last_follow_up' ELSE 'follow_up' END AS kind,\n       t.id AS conversation_id, c.name, coalesce(c.language, 'en') AS language, c.facts->>'intent' AS intent,\n       coalesce(c.facts->>'area', c.facts->>'property_area') AS area,\n       (SELECT json_build_object('text', m.text, 'quick_replies', m.quick_replies) FROM assistant.messages m\n        WHERE m.conversation_id = t.id AND m.direction = 'out' AND m.author = 'ai' AND m.status = 'sent'\n        ORDER BY m.id DESC LIMIT 1) AS last\nFROM touch t JOIN assistant.conversations v ON v.id = t.id JOIN assistant.contacts c ON c.id = v.contact_id",
+        "options": {
+          "queryReplacement": "={{ [ '{' + $json.follow_up_hours.join(',') + '}', $json.timezone ] }}"
+        }
+      },
+      "id": "86560c81-5615-4dcb-ab47-3312d2e6f46a",
+      "name": "Due follow-ups",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Leads the team marked as a no-show: offered another time, once.\nWITH due AS (\n  UPDATE assistant.bookings SET no_show_messaged_at = now(), updated_at = now()\n  WHERE status = 'no_show' AND no_show_messaged_at IS NULL AND conversation_id IS NOT NULL\n  RETURNING id\n)\nSELECT 'no_show' AS kind, b.conversation_id, b.label AS meeting, b.agent, c.name,\n       coalesce(c.language, 'en') AS language, c.facts->>'intent' AS intent\nFROM due JOIN assistant.bookings b ON b.id = due.id JOIN assistant.contacts c ON c.id = b.contact_id\nWHERE c.opted_out_at IS NULL",
+        "options": {
+          "queryReplacement": "={{ [] }}"
+        }
+      },
+      "id": "f282c577-2261-4d7f-a30d-bb813e5a531b",
+      "name": "Missed meetings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function localParts(date, timeZone) {\n  const parts = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);\n  const get = (t) => parts.find((p) => p.type === t)?.value;\n  return { weekday: get('weekday').toLowerCase(), date: `${get('year')}-${get('month')}-${get('day')}`, minutes: Number(get('hour')) * 60 + Number(get('minute')) };\n}\n\nfunction whenText(date, now, timeZone, language) {\n  const es = language === 'es';\n  const locale = es ? 'es-US' : 'en-US';\n  const day = localParts(date, timeZone).date;\n  const relative = [localParts(now, timeZone).date, localParts(new Date(now.getTime() + 86400e3), timeZone).date].indexOf(day);\n  const name = relative >= 0 ? (es ? ['hoy', 'mañana'] : ['today', 'tomorrow'])[relative]\n    : new Intl.DateTimeFormat(locale, { timeZone, weekday: 'long', month: 'short', day: 'numeric' }).format(date);\n  const time = new Intl.DateTimeFormat(locale, { timeZone, hour: 'numeric', minute: '2-digit' }).format(date);\n  const zone = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' }).formatToParts(date).find((p) => p.type === 'timeZoneName')?.value;\n  return `${name} ${es ? 'a las' : 'at'} ${time} (${zone})`.replace(/[  ]/g, ' ');\n}\n\nfunction touchMessage(t, profile, now) {\n  const es = t.language === 'es';\n  const lang = es ? 'es' : 'en';\n  const first = String(t.name ?? '').trim().split(/\\s+/)[0] || '';\n  const hi = first ? (es ? `¡Hola, ${first}!` : `Hi ${first}!`) : (es ? '¡Hola!' : 'Hi!');\n  const when = t.start ? whenText(new Date(t.start), now, profile.business.timezone, lang) : '';\n  const label = profile.intents[t.intent]?.label;\n  const request = label ? `${label.charAt(0).toLowerCase()}${label.slice(1)}${t.area ? ` in ${t.area}` : ''}` : (es ? 'tu búsqueda' : 'your search');\n  const reminder = { name: 'appointment_reminder', language: 'en_US', params: [first || 'there', t.meeting ?? '', t.agent ?? '', when] };\n  switch (t.kind) {\n    case 'reminder_24h':\n      return es\n        ? { text: `${hi} Te recuerdo tu cita (${t.meeting}) con ${t.agent}: ${when}. Si necesitas otro horario, responde aquí.`, quick_replies: ['Ahí estaré', 'Cambiar la hora', 'Cancelarla'], template: reminder }\n        : { text: `${hi} A reminder: your ${t.meeting.toLowerCase()} with ${t.agent} is ${when}. If you need another time, just reply here.`, quick_replies: [\"I'll be there\", 'Change the time', 'Cancel it'], template: reminder };\n    case 'reminder_1h':\n      return es\n        ? { text: `${hi} Tu cita (${t.meeting}) con ${t.agent} es ${when}, en una hora más o menos. ¡Hasta pronto!`, quick_replies: [], template: reminder }\n        : { text: `${hi} Your ${t.meeting.toLowerCase()} with ${t.agent} is ${when}, in about an hour. Talk soon!`, quick_replies: [], template: reminder };\n    case 'follow_up': {\n      const ask = t.question || (es ? `¿Sigues buscando ayuda con ${request}?` : `Are you still looking for help with ${request}?`);\n      return { text: `${hi} ${es ? 'Solo quería saber cómo vas.' : 'Just checking in.'} ${ask}`, quick_replies: t.quick_replies ?? [], template: { name: 'lead_check_in', language: 'en_US', params: [first || 'there', request] } };\n    }\n    case 'last_follow_up':\n      return es\n        ? { text: `${hi} No te escribo más por ahora. Si sigues buscando ayuda con ${request}, responde aquí y seguimos donde lo dejamos. Si prefieres no recibir mensajes, responde STOP.`, quick_replies: ['Sigo buscando', 'Ahora no'], template: { name: 'lead_check_in', language: 'en_US', params: [first || 'there', request] } }\n        : { text: `${hi} I'll leave you be for now. If you're still looking for help with ${request}, just reply here and I'll pick up where we left off. Reply STOP if you'd rather not hear from us.`, quick_replies: ['Still looking', 'Not now'], template: { name: 'lead_check_in', language: 'en_US', params: [first || 'there', request] } };\n    case 'no_show':\n      return es\n        ? { text: `${hi} Lamentamos no haber coincidido en tu cita (${t.meeting}) con ${t.agent}. ¿Quieres elegir otro horario?`, quick_replies: ['Sí, otro horario', 'Ahora no'], template: { name: 'appointment_missed', language: 'en_US', params: [first || 'there', t.meeting ?? '', t.agent ?? ''] } }\n        : { text: `${hi} Sorry we missed you for your ${t.meeting.toLowerCase()} with ${t.agent}. Would you like to pick another time?`, quick_replies: ['Pick another time', 'Not now'], template: { name: 'appointment_missed', language: 'en_US', params: [first || 'there', t.meeting ?? '', t.agent ?? ''] } };\n    default:\n      throw new Error(`touchMessage: unknown kind ${t.kind}`);\n  }\n}\n\nfunction lastQuestion(text) {\n  return String(text ?? '').match(/[^.!?\\n]*\\?/g)?.at(-1)?.trim() ?? null;\n}\n\n// The message for each due reminder, follow-up and missed meeting (touchMessage() in\n// core/assistant.mjs). A follow-up repeats the assistant's open question with its buttons.\nconst { profile } = $('Settings').first().json;\nconst now = new Date();\nreturn $input.all().map((item) => {\n  const t = item.json;\n  const m = touchMessage(t.kind === 'follow_up' ? { ...t, question: lastQuestion(t.last?.text), quick_replies: t.last?.quick_replies ?? [] } : t, profile, now);\n  return { json: { conversation_id: t.conversation_id, kind: t.kind, text: m.text, quick_replies: m.quick_replies, template: m.template } };\n});\n"
+      },
+      "id": "1825bbde-be6b-4334-a3d7-719832cedc39",
+      "name": "Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.queue_message($1::bigint, $2, $3::jsonb) AS q",
+        "options": {
+          "queryReplacement": "={{ [ $json.conversation_id, $json.text, JSON.stringify($json.template) ] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "id": "e9b3aeeb-28b5-4f5d-a47b-07b7f9b779bf",
+      "name": "Queue message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1540,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bcccbca1-0011-4a05-a95a-c494f0791c40",
+              "name": "message_id",
+              "value": "={{ $json.q.message_id }}",
+              "type": "number"
+            },
+            {
+              "id": "1c4e1099-016f-4f94-a06a-a2cb1ddd5ad7",
+              "name": "quick_replies",
+              "value": "={{ $('Messages').item.json.quick_replies ?? [] }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cbdb03b5-e195-4d45-a40f-e62d1e7d7000",
+      "name": "Send input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1760,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstSend0001"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "442c5f26-672c-4844-afed-a2aa42ded809",
+      "name": "Send message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1980,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Meetings that ended at least 30 minutes ago: the team is asked once whether they happened.\nWITH due AS (\n  UPDATE assistant.bookings SET outcome_asked_at = now(), updated_at = now()\n  WHERE status = 'booked' AND outcome_asked_at IS NULL AND ends_at < now() - interval '30 minutes'\n  RETURNING id\n)\nSELECT b.id AS booking_id, b.label, b.agent, b.starts_at, c.name, v.slack_thread_ts\nFROM due JOIN assistant.bookings b ON b.id = due.id JOIN assistant.contacts c ON c.id = b.contact_id\nLEFT JOIN assistant.conversations v ON v.id = b.conversation_id",
+        "options": {
+          "queryReplacement": "={{ [] }}"
+        }
+      },
+      "id": "3d9bcc8a-8830-492a-a3ba-ec156b656480",
+      "name": "Meetings to ask about",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        600
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// After a meeting, the team is asked in the lead's Slack thread whether it happened.\nconst config = $('Config').first().json;\nconst { timezone } = $('Settings').first().json;\nreturn $input.all().map((item) => {\n  const b = item.json;\n  const time = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(b.starts_at));\n  const text = `📋 Did ${b.name || 'the lead'} make it to the ${b.label.toLowerCase()} with ${b.agent} (${time})? React 👍 if they did, 👎 if they didn't show.`;\n  const post = { channel: config.slack_channel, text, unfurl_links: false };\n  if (b.slack_thread_ts) post.thread_ts = b.slack_thread_ts;\n  return { json: { booking_id: b.booking_id, post } };\n});\n"
+      },
+      "id": "37542ca1-54ba-4d5e-a65b-0602381f0921",
+      "name": "Outcome question",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.post }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c5980819-96e5-4423-a9e3-f7466191611f",
+      "name": "Slack: did it happen?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        600
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.bookings SET outcome_slack_ts = $2 WHERE id = $1::bigint RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('Outcome question').item.json.booking_id, $json.ts ?? '' ] }}",
+          "queryBatching": "independently"
+        }
+      },
+      "id": "316fbf3f-250d-44c3-a694-cde2f44ebea6",
+      "name": "Remember outcome post",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1760,
+        600
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 10 minutes": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Read profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read profile": {
+      "main": [
+        [
+          {
+            "node": "Profile text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Profile text": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Due reminders",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Due follow-ups",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Missed meetings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Meetings to ask about",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Due reminders": {
+      "main": [
+        [
+          {
+            "node": "Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Due follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Missed meetings": {
+      "main": [
+        [
+          {
+            "node": "Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Messages": {
+      "main": [
+        [
+          {
+            "node": "Queue message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue message": {
+      "main": [
+        [
+          {
+            "node": "Send input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send input": {
+      "main": [
+        [
+          {
+            "node": "Send message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meetings to ask about": {
+      "main": [
+        [
+          {
+            "node": "Outcome question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outcome question": {
+      "main": [
+        [
+          {
+            "node": "Slack: did it happen?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: did it happen?": {
+      "main": [
+        [
+          {
+            "node": "Remember outcome post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

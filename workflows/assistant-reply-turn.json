@@ -1,0 +1,1946 @@
+{
+  "id": "LeadAsstTurn0001",
+  "name": "Assistant · Reply turn",
+  "description": "Answers a conversation once: waits for a burst, asks the model, saves, sends, tells the team.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## One reply turn\n1. **Wait** a few seconds, then **claim** the turn: only the newest unanswered message starts one, only while the AI (not a person) answers, one turn at a time (`assistant.claim_turn`).\n2. **Context**: the person, what is known about them, their last 40 messages on every channel. The business profile and prompt come from `profiles/` and `prompts/`.\n2b. **Free times**: once a request with a meeting (a call or a visit) is known, the agent's Google Calendar is read and the model gets three times to offer plus the open times by day.\n3. **Model** returns strict JSON (schema built from the profile). It is checked; facts, stage, opt-out, hand-off and booking are decided in code (`core/assistant.mjs`). An unusable answer hands the conversation to the team instead of failing.\n3b. **Book**: the chosen time is checked again in the calendar, then booked there (a moved booking's old event is removed; a cancelled one is deleted). A time taken in the meantime is not booked: the lead gets the other times.\n4. **Save** the turn (`assistant.apply_turn`): merges the person with a contact already known by the phone or email they gave; drops the reply if a person took over meanwhile. Then the booking (`assistant.book_meeting` / `cancel_booking`: stage Booked).\n5. **Send** the reply on the channel the lead wrote from, **tell the team** in Slack when needed, **update HubSpot**, **finish**: messages that arrived during the turn start the next one.",
+        "height": 400,
+        "width": 2300,
+        "color": 6
+      },
+      "id": "3a5cd0d0-0b67-480d-a976-3b902cd9d44b",
+      "name": "Note: overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Switch the model\nIn **Config** set `provider` to `gemini` (Gemini 3.8 Flash, default) or `claude` (Claude Opus 5.5). Same prompt and schema either way.",
+        "height": 240,
+        "width": 300,
+        "color": 4
+      },
+      "id": "9df68033-7c4a-43d5-acfe-dd07f47e9b08",
+      "name": "Note: model switch",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "9d9c1956-fb05-4659-a2d0-02e8320c11b5",
+      "name": "When called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-provider",
+              "name": "provider",
+              "value": "gemini",
+              "type": "string"
+            },
+            {
+              "id": "cfg-gemini",
+              "name": "gemini_model",
+              "value": "gemini-3.8-flash",
+              "type": "string"
+            },
+            {
+              "id": "cfg-claude",
+              "name": "claude_model",
+              "value": "claude-opus-5-5",
+              "type": "string"
+            },
+            {
+              "id": "cfg-debounce",
+              "name": "debounce_seconds",
+              "value": 4,
+              "type": "number"
+            },
+            {
+              "id": "cfg-slack",
+              "name": "slack_channel",
+              "value": "C0CCMJZMVSL",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "5348e5a1-1be9-4878-ae75-e24cf22d588b",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "10646a2f-c64d-2ac3-27b1-280c3132a9f9",
+              "leftValue": "={{ $json.debounce }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d2cb8084-8f63-4505-a705-d886a7501f8e",
+      "name": "Wait for a burst?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ $json.debounce_seconds }}",
+        "unit": "seconds"
+      },
+      "id": "419090cb-d2a4-499c-a46d-9da2f328550c",
+      "name": "Wait for more messages",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ],
+      "webhookId": "c678b271-9e56-4ad5-ad83-d2a23ff9d5d1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.claim_turn($1::bigint, $2::bigint, $3) AS r",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, $('When called').first().json.message_id, $execution.id ] }}"
+        }
+      },
+      "id": "f9876ad8-8ea1-4444-aeed-5c41c5c02f90",
+      "name": "Claim turn",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0b5de292-8516-b63d-7db1-e23c69362d33",
+                    "leftValue": "={{ $json.r.go ? 'go' : $json.r.reason }}",
+                    "rightValue": "go",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Answer"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "55e87e95-8f4c-de37-c37b-54a4057a70e9",
+                    "leftValue": "={{ $json.r.go ? 'go' : $json.r.reason }}",
+                    "rightValue": "human",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Person answering"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Nothing to do"
+        }
+      },
+      "id": "5db51a5a-9819-4cce-a840-ae86a2683f8b",
+      "name": "Go?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "5d74399f-836b-42d7-aff0-c369f34c73c3",
+      "name": "Nothing to do",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.text, ct.name, i.display_name, v.slack_thread_ts\nFROM assistant.messages m\nJOIN assistant.conversations v ON v.id = m.conversation_id\nJOIN assistant.contacts ct ON ct.id = v.contact_id\nLEFT JOIN assistant.identities i ON i.profile = ct.profile AND i.channel = m.channel AND i.external_id = m.identity_id\nWHERE m.id = $1::bigint",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.message_id ] }}"
+        }
+      },
+      "id": "d5d94fa6-6747-46f4-a246-35dd686f3770",
+      "name": "Load lead message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// While a person handles the conversation, each new message from the lead goes to the Slack thread.\nconst config = $('Config').first().json;\nconst m = $input.first().json;\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst name = m.name ?? m.display_name ?? 'Lead';\nconst text = `💬 *${esc(name)}:* ${esc(m.text)}`;\nconst post = { channel: config.slack_channel, text, unfurl_links: false };\nif (m.slack_thread_ts) post.thread_ts = m.slack_thread_ts;\nreturn [{ json: post }];\n"
+      },
+      "id": "0f805bb0-bcd3-4f91-a9dd-3078c9632bf1",
+      "name": "Lead message to team",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "e4f788dd-737e-4bf5-ad71-693401925ee9",
+      "name": "Slack: lead message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        400
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Everything one turn needs: the conversation, the person, their last 40 messages on every channel,\n-- the hand-offs to and from the team over those messages, and the channel identity to answer on (the\n-- one the newest message came from).\nWITH conv AS (SELECT * FROM assistant.conversations WHERE id = $1::bigint),\nct AS (SELECT c.* FROM assistant.contacts c JOIN conv ON c.id = conv.contact_id),\nrecent AS (\n  SELECT m.id, m.author, m.channel, m.text, m.sent_at\n  FROM assistant.messages m JOIN assistant.conversations v ON v.id = m.conversation_id\n  WHERE v.contact_id = (SELECT id FROM ct) AND m.status IN ('received', 'sent')\n  ORDER BY m.sent_at DESC, m.id DESC LIMIT 40\n),\ntarget AS (\n  SELECT i.channel, i.external_id, i.address, i.display_name, i.last_inbound_at\n  FROM assistant.messages m\n  JOIN assistant.identities i ON i.profile = (SELECT profile FROM ct) AND i.channel = m.channel AND i.external_id = m.identity_id\n  WHERE m.id = $2::bigint\n)\nSELECT (SELECT row_to_json(conv) FROM conv) AS conversation,\n       (SELECT row_to_json(ct) FROM ct) AS contact,\n       (SELECT coalesce(json_agg(r ORDER BY r.sent_at, r.id), '[]') FROM recent r) AS messages,\n       (SELECT coalesce(json_agg(json_build_object('kind', e.kind, 'at', e.created_at) ORDER BY e.id), '[]')\n          FROM assistant.events e\n          WHERE e.contact_id = (SELECT id FROM ct) AND e.kind IN ('handoff', 'takeover', 'handback')\n            AND e.created_at >= (SELECT min(sent_at) FROM recent)) AS team_events,\n       (SELECT row_to_json(target) FROM target) AS reply_to,\n       (SELECT coalesce(sum(cost_usd), 0) FROM assistant.ai_calls WHERE conversation_id = $1::bigint) AS ai_cost_usd,\n       (SELECT json_build_object('meeting', b.label, 'agent', b.agent, 'start', b.starts_at, 'calendar_id', b.calendar_id, 'event_id', b.event_id)\n          FROM assistant.bookings b\n          WHERE b.contact_id = (SELECT id FROM ct) AND b.status = 'booked' AND b.starts_at > now()\n          ORDER BY b.starts_at LIMIT 1) AS booking",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, $json.r.upto ] }}"
+        }
+      },
+      "id": "6e2e52e8-1147-4606-ac63-f07409e34aa2",
+      "name": "Load context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1320,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f907472b-7c51-ae7d-3f8a-71f9f1978b28",
+              "leftValue": "={{ $json.reply_to?.channel === 'telegram' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b9c86220-9fdd-4bf1-a729-6311dd81ed7d",
+      "name": "Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendChatAction",
+        "chatId": "={{ $json.reply_to.address.chat_id }}",
+        "action": "typing"
+      },
+      "id": "898418e8-9378-41ac-a1c3-71382bdba0ed",
+      "name": "Telegram: typing",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "laCredTelegram01",
+          "name": "Telegram bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ '/home/node/.n8n-files/{prompts/assistant.system.md,profiles/' + $('Load context').first().json.contact.profile + '.json}' }}",
+        "options": {}
+      },
+      "id": "2ebec24e-90aa-4fa7-a11f-d7c9c47f306e",
+      "name": "Read prompt files",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "data",
+        "destinationKey": "text",
+        "options": {}
+      },
+      "id": "3f77515f-f233-4fe0-a9fc-7ddc93aa5358",
+      "name": "Read file text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function missingFields(intent, facts, contact, profile) {\n  const ask = profile.intents[intent]?.ask ?? [];\n  return ask.filter((f) => (f === 'contact' ? !(contact.email || contact.phone) : f === 'name' ? !contact.name : facts[f] == null || facts[f] === ''));\n}\n\nfunction meetingPlan(intent, language, profile) {\n  const type = profile.intents[intent]?.meeting;\n  const meeting = type ? profile.meetings?.[type] : null;\n  if (!meeting) return null;\n  const team = profile.business.team.filter((t) => t.handles.includes(intent) && t.calendar_id);\n  const agent = team.find((t) => t.languages.includes(language)) ?? team[0];\n  return agent ? { type, label: meeting.label, minutes: meeting.minutes, where: meeting.where, agent: agent.name, calendar_id: agent.calendar_id } : null;\n}\n\nfunction bookingDue(contact, profile, current) {\n  if (current) return true;\n  return Boolean(profile.intents[contact.facts?.intent]?.meeting);\n}\n\n// Whether this turn may offer or change a meeting, and with whom (core/assistant.mjs). If so, the\n// agent's calendar is read for the coming days next.\nlet profile = null;\nfor (const item of $('Read file text').all()) {\n  try { profile = JSON.parse(item.json.text); } catch { /* the prompt template */ }\n}\nconst row = $('Load context').first().json;\nconst c = row.contact;\nconst plan = bookingDue(c, profile, row.booking) ? meetingPlan(c.facts?.intent, c.language ?? 'en', profile) : null;\nconst days = (profile.booking?.days_ahead ?? 7) + 1;\nreturn [{ json: { plan, time_min: new Date().toISOString(), time_max: new Date(Date.now() + days * 86400e3).toISOString() } }];\n"
+      },
+      "id": "86e758ff-9146-4e26-a092-96f452a4142d",
+      "name": "Booking plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "409a3fd0-72f7-3f88-6d7d-ab598d5d0d35",
+              "leftValue": "={{ !!$json.plan }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "8de13762-c1dc-4d3e-afaa-b6e4b6ac8a27",
+      "name": "Free times needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { timeMin: $json.time_min, timeMax: $json.time_max, items: [ { id: $json.plan.calendar_id } ] } }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a127d549-fb62-46fc-a384-51c35e1af627",
+      "name": "Calendar: busy times",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        0
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "laCredGCalendar1",
+          "name": "Google Calendar (agents)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds the model call for the provider chosen in Config. The prompt template and the business\n// profile come from prompts/ and profiles/ (mounted read-only); the schema is built from the profile.\n// The functions below are copied from core/assistant.mjs and core/model-request.mjs.\n\nconst CHANNEL_NAMES = { telegram: 'Telegram', whatsapp: 'WhatsApp', messenger: 'Facebook Messenger', instagram: 'Instagram Direct', web_chat: 'the chat on the website', email: 'email', web_form: 'the contact form on the website (your reply goes to their email)', lead_ads: 'a Facebook lead form (your reply goes to their WhatsApp)' };\n\nfunction renderProfile(profile) {\n  const b = profile.business;\n  const lines = [\n    `- Name: ${b.name}, a ${b.kind} in ${b.city}.`,\n    `- Areas served: ${b.areas.join(', ')}.`,\n    `- Hours (${b.timezone}): ${Object.entries(b.hours).map(([d, h]) => `${d} ${h}`).join('; ')}.`,\n    `- Languages: ${b.languages.join(', ')}.`,\n    `- Office: ${b.office}.`,\n    '- Team:',\n    ...b.team.map((t) => `  - ${t.name}, ${t.role} (${t.languages.join('/')}), works with: ${t.handles.join(', ')}`),\n  ];\n  const intents = Object.entries(profile.intents).map(([k, v]) =>\n    `- \\`${k}\\` (${v.label}): ${v.ask.map((f) => (f === 'contact' ? 'phone or email' : f)).join(', ')}`);\n  const fields = Object.entries(profile.fields).filter(([k]) => k !== 'contact').map(([k, v]) => `- \\`${k}\\`: ${v}`);\n  const faq = profile.faq.map((f) => `- Q: ${f.q}\\n  A: ${f.a}`);\n  return {\n    PROFILE: lines.join('\\n'),\n    INTENTS: intents.join('\\n'),\n    FIELDS: [...fields, '- `email`: their email address, lower case', '- `phone`: their phone number as written'].join('\\n'),\n    FAQ: faq.join('\\n'),\n    NEVER: profile.never.map((s) => `- Never ${s}.`).join('\\n'),\n    HANDOFF: profile.handoff.map((s) => `- ${s}`).join('\\n'),\n    HOT: profile.hot_lead.map((s) => `- ${s}`).join('\\n'),\n  };\n}\n\nfunction renderSystemPrompt(template, profile) {\n  const values = {\n    ASSISTANT: profile.assistant.intro,\n    BUSINESS: profile.business.name,\n    TONE: profile.assistant.tone,\n    MAX_CHARS: String(profile.assistant.max_reply_chars),\n    ...renderProfile(profile),\n  };\n  return template.replace(/\\{\\{([A-Z_]+)\\}\\}/g, (m, k) => values[k] ?? m);\n}\n\nfunction profileFields(profile) {\n  return [...Object.keys(profile.fields).filter((k) => k !== 'contact'), 'email', 'phone'];\n}\n\nfunction buildReplySchema(profile) {\n  const nullable = { anyOf: [{ type: 'string' }, { type: 'null' }] };\n  const facts = Object.fromEntries(profileFields(profile).map((k) => [k, nullable]));\n  return {\n    type: 'object',\n    additionalProperties: false,\n    required: ['language', 'intent', 'facts', 'is_hot', 'action', 'handoff_reason', 'injection', 'reply', 'asking', 'quick_replies', 'booking', 'slot', 'summary'],\n    properties: {\n      language: { type: 'string' },\n      intent: { type: 'string', enum: [...Object.keys(profile.intents), 'other', 'unknown'] },\n      facts: { type: 'object', additionalProperties: false, required: Object.keys(facts), properties: facts },\n      is_hot: { type: 'boolean' },\n      action: { type: 'string', enum: ['reply', 'handoff', 'opt_out'] },\n      handoff_reason: nullable,\n      injection: { type: 'boolean' },\n      reply: { type: 'string' },\n      // An enum, not nullable: Claude's structured outputs allow at most 16 union-typed fields.\n      asking: { type: 'string', enum: [...new Set([...profileFields(profile), 'contact', 'meeting_time', 'none'])] },\n      quick_replies: { type: 'array', items: { type: 'string' } },\n      // The lead picked one of the offered meeting times (`slot` is its id), or cancels their booking.\n      booking: { type: 'string', enum: ['none', 'book', 'cancel'] },\n      slot: { type: 'string' },\n      summary: { type: 'string' },\n    },\n  };\n}\n\nfunction localParts(date, timeZone) {\n  const parts = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);\n  const get = (t) => parts.find((p) => p.type === t)?.value;\n  return { weekday: get('weekday').toLowerCase(), date: `${get('year')}-${get('month')}-${get('day')}`, minutes: Number(get('hour')) * 60 + Number(get('minute')) };\n}\n\nfunction formatLocal(date, timeZone) {\n  return new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date);\n}\n\nfunction hoursOn(profile, weekday) {\n  const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];\n  const day = days.indexOf(weekday);\n  for (const [span, hours] of Object.entries(profile.business.hours)) {\n    const [from, to = from] = span.split('-').map((d) => days.indexOf(d));\n    const inSpan = from <= to ? day >= from && day <= to : day >= from || day <= to;\n    if (!inSpan || hours === 'closed') continue;\n    return hours.split('-').map((t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; });\n  }\n  return null;\n}\n\nfunction isOpen(profile, date) {\n  const now = localParts(date, profile.business.timezone);\n  const hours = hoursOn(profile, now.weekday);\n  return !!hours && now.minutes >= hours[0] && now.minutes < hours[1];\n}\n\nfunction zonedTime(date, minutes, timeZone) {\n  const [y, m, d] = date.split('-').map(Number);\n  const wall = Date.UTC(y, m - 1, d, 0, minutes);\n  let t = wall;\n  // Shift by the zone's offset; twice, in case the first guess fell across a daylight-saving change.\n  for (let i = 0; i < 2; i++) {\n    const p = localParts(new Date(t), timeZone);\n    const [py, pm, pd] = p.date.split('-').map(Number);\n    t = wall - (Date.UTC(py, pm - 1, pd, 0, p.minutes) - t);\n  }\n  return new Date(t);\n}\n\nfunction slotLabel(date, now, timeZone, language) {\n  const locale = language === 'es' ? 'es-US' : 'en-US';\n  const words = language === 'es' ? ['Hoy', 'Mañana'] : ['Today', 'Tomorrow'];\n  const day = localParts(date, timeZone).date;\n  const relative = [localParts(now, timeZone).date, localParts(new Date(now.getTime() + 86400e3), timeZone).date].indexOf(day);\n  const time = new Intl.DateTimeFormat(locale, { timeZone, hour: 'numeric', minute: '2-digit' }).format(date);\n  // Spanish month names make \"lun, 26 de oct\" too long for a button: weekday and day only.\n  const dayFormat = language === 'es' ? { weekday: 'short', day: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric' };\n  const name = relative >= 0 ? words[relative] : new Intl.DateTimeFormat(locale, { timeZone, ...dayFormat }).format(date);\n  return `${name} ${time}`.replace(/[  ]/g, ' ');\n}\n\nfunction freeSlots(busy, plan, profile, now, language) {\n  const tz = profile.business.timezone;\n  const rules = { min_notice_hours: 2, days_ahead: 7, step_minutes: 30, offer: 3, ...profile.booking };\n  const taken = busy.map((b) => [new Date(b.start).getTime(), new Date(b.end).getTime()]);\n  const earliest = now.getTime() + rules.min_notice_hours * 3600e3;\n  const noon = zonedTime(localParts(now, tz).date, 12 * 60, tz).getTime();\n  const slots = [];\n  for (let d = 0; d <= rules.days_ahead && slots.length < rules.offer; d++) {\n    const day = localParts(new Date(noon + d * 86400e3), tz);\n    const hours = hoursOn(profile, day.weekday);\n    if (!hours) continue;\n    const pick = (from) => {\n      for (let m = from; m + plan.minutes <= hours[1]; m += rules.step_minutes) {\n        const start = zonedTime(day.date, m, tz).getTime();\n        const end = start + plan.minutes * 60e3;\n        if (start >= earliest && !taken.some(([a, b]) => start < b && end > a)) return { m, start, end };\n      }\n      return null;\n    };\n    const afternoon = slots.length % 2 === 1;\n    const found = (afternoon && pick(Math.max(hours[0], 13 * 60))) || pick(hours[0]);\n    if (!found) continue;\n    const hhmm = `${String(Math.floor(found.m / 60)).padStart(2, '0')}:${String(found.m % 60).padStart(2, '0')}`;\n    slots.push({ id: `${day.date}T${hhmm}`, start: new Date(found.start).toISOString(), end: new Date(found.end).toISOString(), label: slotLabel(new Date(found.start), now, tz, language) });\n  }\n  return slots;\n}\n\nfunction freeWindows(busy, plan, profile, now) {\n  const tz = profile.business.timezone;\n  const rules = { min_notice_hours: 2, days_ahead: 7, step_minutes: 30, ...profile.booking };\n  const taken = busy.map((b) => [new Date(b.start).getTime(), new Date(b.end).getTime()]);\n  const earliest = now.getTime() + rules.min_notice_hours * 3600e3;\n  const noon = zonedTime(localParts(now, tz).date, 12 * 60, tz).getTime();\n  const days = [];\n  for (let d = 0; d <= rules.days_ahead; d++) {\n    const day = localParts(new Date(noon + d * 86400e3), tz);\n    const hours = hoursOn(profile, day.weekday);\n    if (!hours) continue;\n    const ranges = [];\n    for (let m = hours[0]; m + plan.minutes <= hours[1]; m += rules.step_minutes) {\n      const start = zonedTime(day.date, m, tz).getTime();\n      const free = start >= earliest && !taken.some(([a, b]) => start < b && start + plan.minutes * 60e3 > a);\n      if (!free) continue;\n      const last = ranges.at(-1);\n      if (last && last[1] === m - rules.step_minutes) last[1] = m;\n      else ranges.push([m, m]);\n    }\n    if (ranges.length) days.push({ date: day.date, weekday: day.weekday, ranges });\n  }\n  return days;\n}\n\nconst TEAM_NOTES = {\n  handoff: 'The conversation was handed to the team.',\n  takeover: 'A team member took over the conversation.',\n  handback: 'The team handed the conversation back to {name}.',\n};\n\nfunction fenceChat(text) {\n  return String(text ?? '').replace(/<\\/?conversation>/gi, (t) => t.replace('<', '< '));\n}\n\nfunction formatTurnInput(ctx, profile, now) {\n  const tz = profile.business.timezone;\n  const c = ctx.contact;\n  const b = ctx.booking;\n  const hhmm = (m) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;\n  const booking = !b ? [] : [\n    b.current && `Their booking: ${b.current.meeting} with ${b.current.agent}, ${slotLabel(new Date(b.current.start), now, tz, 'en')}.`,\n    b.plan && `Meeting to offer: ${b.plan.label} (${b.plan.minutes} minutes, ${b.plan.where}) with ${b.plan.agent}.`,\n    b.plan && (b.slots.length\n      ? `Free times (${tz}): ${b.slots.map((s) => `${s.id} = \"${s.label}\"`).join('; ')}.`\n      : 'Free times: none in the coming days.'),\n    b.plan && b.windows?.length && `Open times by day (24-hour, ${tz}; the meeting can start at any time in these ranges): ${b.windows.map((w) => `${w.date} ${w.weekday} ${w.ranges.map(([f, t]) => (f === t ? hhmm(f) : `${hhmm(f)}-${hhmm(t)}`)).join(', ')}`).join('; ')}.`,\n  ].filter(Boolean);\n  const known = Object.entries({ name: c.name, email: c.email, phone: c.phone, ...(c.facts ?? {}) }).filter(([, v]) => v != null && v !== '');\n  const who = { lead: 'Lead', ai: profile.assistant.name, human: 'Team member', system: 'System' };\n  const notes = (ctx.team_events ?? []).filter((e) => TEAM_NOTES[e.kind])\n    .map((e) => ({ author: 'system', text: TEAM_NOTES[e.kind].replace('{name}', profile.assistant.name), sent_at: e.at }));\n  const transcript = [...ctx.messages, ...notes].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at)).map((m) => {\n    const t = new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(m.sent_at));\n    return `[${t}] ${who[m.author] ?? m.author}: ${fenceChat(m.text) || '(no text)'}`;\n  });\n  return [\n    `Now: ${formatLocal(now, tz)} (${tz}). The office is ${isOpen(profile, now) ? 'open' : 'closed'} right now.`,\n    `Channel: ${CHANNEL_NAMES[ctx.channel] ?? ctx.channel}.`,\n    `Stage: ${c.stage}.`,\n    `Already known about the lead: ${known.length ? known.map(([k, v]) => `${k}: ${v}`).join('; ') : 'nothing yet'}.`,\n    ...booking,\n    '',\n    '<conversation>',\n    ...transcript,\n    '</conversation>',\n    '',\n    `Write ${profile.assistant.name}'s next message to the lead.`,\n  ].join('\\n');\n}\n\nconst TURN_MAX_TOKENS = 8000;\n\nconst CLAUDE_FALLBACK_MODELS = ['claude-opus-5-5'];\n\nfunction turnRequest(provider, model, { system, user, schema }) {\n  if (provider === 'gemini') {\n    return {\n      url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,\n      headers: {},\n      body: {\n        systemInstruction: { parts: [{ text: system }] },\n        contents: [{ role: 'user', parts: [{ text: user }] }],\n        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: schema, maxOutputTokens: TURN_MAX_TOKENS, thinkingConfig: { thinkingLevel: 'low' } },\n      },\n    };\n  }\n  if (provider === 'claude') {\n    const fallback = CLAUDE_FALLBACK_MODELS.includes(model);\n    const body = {\n      model,\n      max_tokens: TURN_MAX_TOKENS,\n      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],\n      messages: [{ role: 'user', content: user }],\n      output_config: { format: { type: 'json_schema', schema }, effort: 'low' },\n    };\n    if (fallback) body.fallbacks = 'default';\n    return {\n      url: 'https://api.anthropic.com/v1/messages',\n      headers: fallback ? { 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01' } : { 'anthropic-version': '2023-06-01' },\n      body,\n    };\n  }\n  throw new Error(`provider must be \"gemini\" or \"claude\", got \"${provider}\"`);\n}\n\nlet template = null;\nlet profile = null;\nfor (const item of $('Read file text').all()) {\n  try { profile = JSON.parse(item.json.text); } catch { template = item.json.text; }\n}\nif (!template || !profile) throw new Error('Could not read prompts/assistant.system.md and the business profile');\n\nconst config = $('Config').first().json;\nconst row = $('Load context').first().json;\nconst now = new Date();\n// Free times from the agent's calendar, when Booking plan asked for them. If the calendar could not\n// be read, no meeting is offered this turn.\nconst plan = $('Booking plan').first().json.plan;\nconst calendar = plan && $('Calendar: busy times').isExecuted ? $('Calendar: busy times').first().json.calendars?.[plan.calendar_id] : null;\nconst offer = plan && calendar && !calendar.errors ? plan : null;\nconst language = row.contact.language ?? 'en';\nconst booking = offer || row.booking ? {\n  plan: offer,\n  slots: offer ? freeSlots(calendar.busy ?? [], offer, profile, now, language) : [],\n  windows: offer ? freeWindows(calendar.busy ?? [], offer, profile, now) : [],\n  current: row.booking ?? null,\n} : null;\nconst ctx = { contact: row.contact, channel: row.reply_to?.channel ?? 'web_chat', messages: row.messages, team_events: row.team_events, booking, now: now.toISOString() };\nconst model = config.provider === 'claude' ? config.claude_model : config.gemini_model;\nconst schema = buildReplySchema(profile);\nconst request = turnRequest(config.provider, model, { system: renderSystemPrompt(template, profile), user: formatTurnInput(ctx, profile, now), schema });\nreturn [{ json: { provider: config.provider, model, ...request, schema, profile, ctx, started_at: Date.now() } }];\n"
+      },
+      "id": "33d2a973-99d7-45eb-ae5e-1805df62dd3e",
+      "name": "Build model request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f8a23867-c208-7efc-0973-c43d22d7f04c",
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "gemini",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Gemini"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3c7456c1-d4bd-4d50-bebb-ab374c8fbafa",
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "claude",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Claude"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "40b299df-bbff-4b0d-ab14-b0dbb89359e7",
+      "name": "Provider",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        3300,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "d1528f9f-a08a-42da-a6fd-fb8bed1ece80",
+      "name": "Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "liCredGemini0001",
+          "name": "Gemini API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 20000
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.headers) }}"
+      },
+      "id": "fb089b0a-1785-4802-abeb-c1fe4b4c55a0",
+      "name": "Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        220
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "liCredAnthropic1",
+          "name": "Anthropic API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Checks the model's answer against the schema, prices the call and decides what happens:\n// the reply, the contact update, the stage, opt-out and hand-off. Copied from core/ and eval/lib.\n\nfunction typeOf(v) {\n  if (v === null) return 'null';\n  if (Array.isArray(v)) return 'array';\n  return typeof v === 'number' ? 'number' : typeof v;\n}\n\nfunction check(schema, value, path, errors) {\n  if (schema.anyOf) {\n    const ok = schema.anyOf.some((s) => {\n      const sub = [];\n      check(s, value, path, sub);\n      return sub.length === 0;\n    });\n    if (!ok) errors.push(`${path}: matches none of the allowed shapes`);\n    return;\n  }\n  const actual = typeOf(value);\n  if (schema.type && schema.type !== actual && !(schema.type === 'integer' && Number.isInteger(value))) {\n    errors.push(`${path}: expected ${schema.type}, got ${actual}`);\n    return;\n  }\n  if (schema.enum && !schema.enum.includes(value)) errors.push(`${path}: '${value}' is not one of ${schema.enum.join(', ')}`);\n  if (actual === 'object') {\n    for (const key of schema.required ?? []) if (!(key in value)) errors.push(`${path}.${key}: missing`);\n    for (const [key, v] of Object.entries(value)) {\n      const sub = schema.properties?.[key];\n      if (sub) check(sub, v, `${path}.${key}`, errors);\n      else if (schema.additionalProperties === false) errors.push(`${path}.${key}: not allowed`);\n    }\n  }\n  if (actual === 'array' && schema.items) value.forEach((v, i) => check(schema.items, v, `${path}[${i}]`, errors));\n}\n\nfunction parseAndValidate(text, schema) {\n  let value;\n  try {\n    value = JSON.parse(text);\n  } catch (e) {\n    return { ok: false, value: null, errors: [`not valid JSON: ${e.message}`] };\n  }\n  const errors = [];\n  check(schema, value, '$', errors);\n  return { ok: errors.length === 0, value, errors };\n}\n\nconst TURN_PRICES = {\n  'gemini-3.8-flash': { input: 0.75, output: 3.75 },\n  'claude-opus-5-5': { input: 4.0, output: 20.0, cache_write: 5.0, cache_read: 0.2 },\n  'claude-haiku-5-5': { input: 0.1, output: 0.5, cache_write: 0.125, cache_read: 0.01 },\n};\n\nfunction parseTurnResponse(provider, model, response) {\n  if (response?.error) {\n    const e = response.error;\n    return { text: '', model, stop_reason: 'error', usage: { input_tokens: 0, output_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 0 }, error: typeof e === 'string' ? e : (e.message ?? JSON.stringify(e)) };\n  }\n  if (provider === 'claude') {\n    const u = response.usage ?? {};\n    return {\n      text: (response.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join(''),\n      model: response.model ?? model,\n      stop_reason: response.stop_reason,\n      usage: { input_tokens: u.input_tokens ?? 0, output_tokens: u.output_tokens ?? 0, cache_write_tokens: u.cache_creation_input_tokens ?? 0, cache_read_tokens: u.cache_read_input_tokens ?? 0 },\n      error: null,\n    };\n  }\n  const candidate = response.candidates?.[0];\n  const finish = candidate?.finishReason ?? response.promptFeedback?.blockReason ?? 'NO_CANDIDATE';\n  const u = response.usageMetadata ?? {};\n  return {\n    text: (candidate?.content?.parts ?? []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join(''),\n    model: response.modelVersion ?? model,\n    stop_reason: { STOP: 'end_turn', MAX_TOKENS: 'max_tokens', SAFETY: 'refusal', PROHIBITED_CONTENT: 'refusal' }[finish] ?? finish.toLowerCase(),\n    usage: { input_tokens: u.promptTokenCount ?? 0, output_tokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0), cache_write_tokens: 0, cache_read_tokens: 0 },\n    error: null,\n  };\n}\n\nfunction turnCost(model, usage) {\n  const p = TURN_PRICES[model];\n  if (!p) return null;\n  return (usage.input_tokens * p.input + usage.output_tokens * p.output\n    + usage.cache_write_tokens * (p.cache_write ?? p.input) + usage.cache_read_tokens * (p.cache_read ?? p.input)) / 1e6;\n}\n\nconst CHANNEL_LIMITS = { telegram: 4096, whatsapp: 4096, messenger: 2000, instagram: 1000, web_chat: 4000, email: 20000, lead_ads: 900 };\n\nconst OPT_OUT_RE = /^\\s*(stop|stop all|unsubscribe|cancel|end|quit|opt out|optout|baja|alto|parar)\\s*[.!]*\\s*$/i;\n\nconst FALLBACK_REPLY = {\n  en: 'Thanks for your message! A member of our team will get back to you here shortly.',\n  es: '¡Gracias por tu mensaje! Alguien de nuestro equipo te responderá por aquí en breve.',\n};\n\nconst TYPED_DETAILS = ['name', 'email', 'phone', 'contact'];\n\nconst OTHER_REPLY = { en: 'Other', es: 'Otro' };\n\nconst BUTTON_CHANNELS = ['telegram', 'whatsapp', 'messenger', 'instagram', 'web_chat'];\n\nfunction localParts(date, timeZone) {\n  const parts = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);\n  const get = (t) => parts.find((p) => p.type === t)?.value;\n  return { weekday: get('weekday').toLowerCase(), date: `${get('year')}-${get('month')}-${get('day')}`, minutes: Number(get('hour')) * 60 + Number(get('minute')) };\n}\n\nfunction zonedTime(date, minutes, timeZone) {\n  const [y, m, d] = date.split('-').map(Number);\n  const wall = Date.UTC(y, m - 1, d, 0, minutes);\n  let t = wall;\n  // Shift by the zone's offset; twice, in case the first guess fell across a daylight-saving change.\n  for (let i = 0; i < 2; i++) {\n    const p = localParts(new Date(t), timeZone);\n    const [py, pm, pd] = p.date.split('-').map(Number);\n    t = wall - (Date.UTC(py, pm - 1, pd, 0, p.minutes) - t);\n  }\n  return new Date(t);\n}\n\nfunction slotLabel(date, now, timeZone, language) {\n  const locale = language === 'es' ? 'es-US' : 'en-US';\n  const words = language === 'es' ? ['Hoy', 'Mañana'] : ['Today', 'Tomorrow'];\n  const day = localParts(date, timeZone).date;\n  const relative = [localParts(now, timeZone).date, localParts(new Date(now.getTime() + 86400e3), timeZone).date].indexOf(day);\n  const time = new Intl.DateTimeFormat(locale, { timeZone, hour: 'numeric', minute: '2-digit' }).format(date);\n  // Spanish month names make \"lun, 26 de oct\" too long for a button: weekday and day only.\n  const dayFormat = language === 'es' ? { weekday: 'short', day: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric' };\n  const name = relative >= 0 ? words[relative] : new Intl.DateTimeFormat(locale, { timeZone, ...dayFormat }).format(date);\n  return `${name} ${time}`.replace(/[  ]/g, ' ');\n}\n\nfunction slotAt(id, windows, plan, profile, now, language) {\n  const m = /^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})$/.exec(String(id ?? ''));\n  if (!m) return null;\n  const minutes = Number(m[2]) * 60 + Number(m[3]);\n  const day = windows.find((w) => w.date === m[1]);\n  if (!day?.ranges.some(([from, to]) => minutes >= from && minutes <= to)) return null;\n  const tz = profile.business.timezone;\n  const start = zonedTime(m[1], minutes, tz);\n  return { id, start: start.toISOString(), end: new Date(start.getTime() + plan.minutes * 60e3).toISOString(), label: slotLabel(start, now, tz, language) };\n}\n\nfunction normalizePhone(raw) {\n  const digits = String(raw ?? '').replace(/\\D/g, '');\n  if (digits.length < 10) return null;\n  return digits.length === 10 ? `+1${digits}` : `+${digits}`;\n}\n\nfunction normalizeEmail(raw) {\n  const s = String(raw ?? '').trim().toLowerCase();\n  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(s) ? s : null;\n}\n\nfunction missingFields(intent, facts, contact, profile) {\n  const ask = profile.intents[intent]?.ask ?? [];\n  return ask.filter((f) => (f === 'contact' ? !(contact.email || contact.phone) : f === 'name' ? !contact.name : facts[f] == null || facts[f] === ''));\n}\n\nfunction decideTurn(checked, ctx, profile) {\n  const c = ctx.contact;\n  const lastLead = [...ctx.messages].reverse().find((m) => m.author === 'lead');\n  const keywordOptOut = !!lastLead && OPT_OUT_RE.test(lastLead.text);\n  const events = [];\n\n  if (!checked.ok) {\n    const lang = FALLBACK_REPLY[c.language] ? c.language : 'en';\n    if (keywordOptOut) {\n      return { ok: false, action: 'opt_out', reply: lang === 'es' ? 'Listo, no te enviaremos más mensajes.' : \"Done, you won't get any more messages from us.\", handoff_reason: null, contact_patch: { opted_out: true }, events: [{ kind: 'opted_out', data: { by: 'keyword' } }], summary: null };\n    }\n    return {\n      ok: false,\n      action: 'handoff',\n      reply: FALLBACK_REPLY[lang],\n      handoff_reason: `AI answer unusable: ${(checked.errors ?? []).slice(0, 3).join('; ')}`.slice(0, 300),\n      contact_patch: {},\n      events: [{ kind: 'handoff', data: { reason: 'ai_unusable' } }],\n      summary: null,\n    };\n  }\n\n  const r = checked.value;\n  // Facts accumulate: a value the model leaves out (null) never erases one learned earlier.\n  const facts = { ...(c.facts ?? {}) };\n  for (const [k, v] of Object.entries(r.facts)) if (v != null && String(v).trim() !== '' && k !== 'email' && k !== 'phone' && k !== 'name') facts[k] = String(v).trim();\n  const email = c.email ?? normalizeEmail(r.facts.email);\n  const phone = c.phone ?? normalizePhone(r.facts.phone);\n  const name = c.name ?? (r.facts.name ? String(r.facts.name).trim() : null);\n  const intent = r.intent !== 'unknown' ? r.intent : (facts.intent ?? 'unknown');\n  if (intent !== 'unknown') facts.intent = intent;\n\n  const missing = profile.intents[intent] ? missingFields(intent, facts, { name, email, phone }, profile) : null;\n  let stage = c.stage;\n  // Only an intent the business serves moves the lead along; \"other\" and \"unknown\" leave the stage as it is.\n  if (['new', 'qualifying'].includes(stage) && missing) stage = missing.length === 0 ? 'qualified' : 'qualifying';\n  if (stage !== c.stage) events.push({ kind: 'stage_changed', data: { from: c.stage, to: stage } });\n\n  const isHot = !!(c.is_hot || r.is_hot);\n  if (isHot && !c.is_hot) events.push({ kind: 'hot', data: {} });\n\n  let action = r.action;\n  let reason = r.handoff_reason;\n  if (keywordOptOut) action = 'opt_out';\n  else if (r.injection && action !== 'opt_out') { action = 'handoff'; reason = reason ?? 'Message tried to change the assistant\\'s instructions'; }\n  if (action === 'handoff') events.push({ kind: 'handoff', data: { reason: reason ?? 'model' } });\n  if (action === 'opt_out') events.push({ kind: 'opted_out', data: { by: keywordOptOut ? 'keyword' : 'model' } });\n\n  const limit = Math.min(CHANNEL_LIMITS[ctx.channel] ?? 2000, Math.max(profile.assistant.max_reply_chars * 2, 400));\n  let reply = String(r.reply ?? '').trim();\n  // A hand-off always tells the lead that someone will answer, even if the model left the reply empty.\n  if (!reply && action === 'handoff') reply = FALLBACK_REPLY[r.language] ?? FALLBACK_REPLY.en;\n  if (reply.length > limit) reply = `${reply.slice(0, limit - 1).replace(/\\s+\\S*$/, '')}…`;\n\n  // Answers the lead can tap (buttons in chat apps). The assistant's first message offers the\n  // profile's example openers while it's unclear what the person wants; later, the model's options\n  // for a question with a few typical answers. Contact details are always typed, and a button holds\n  // up to 20 characters (WhatsApp), three at most, plus \"Other\". After \"Other\" the lead types.\n  const firstReply = !ctx.messages.some((m) => m.author === 'ai' || m.author === 'human');\n  const others = Object.values(OTHER_REPLY).map((s) => s.toLowerCase());\n  const tappedOther = others.includes(String(ctx.messages.filter((m) => m.author === 'lead').at(-1)?.text ?? '').trim().toLowerCase());\n  const tappable = (list) => [...new Set((list ?? []).map((s) => String(s).trim()).filter((s) => s && s.length <= 20 && !others.includes(s.toLowerCase())))].slice(0, 3);\n  const offered = ctx.booking?.slots ?? [];\n  let quickReplies = [];\n  if (action !== 'reply' || tappedOther || !BUTTON_CHANNELS.includes(ctx.channel)) quickReplies = [];\n  else if (firstReply && intent === 'unknown') quickReplies = tappable(profile.assistant.starters);\n  // Meeting times: the ones the model suggested itself (from the open times), else the offered free times.\n  else if (r.asking === 'meeting_time') quickReplies = tappable(r.quick_replies).length >= 2 ? tappable(r.quick_replies) : tappable(offered.map((s) => s.label));\n  else if (!TYPED_DETAILS.includes(r.asking)) quickReplies = tappable(r.quick_replies);\n  quickReplies = quickReplies.length < 2 ? [] : [...quickReplies, OTHER_REPLY[r.language] ?? OTHER_REPLY.en];\n\n  // A booking names one of the offered times (the workflow checks the calendar again before\n  // booking it); booking while one exists moves it. Cancelling needs a booking to cancel.\n  let booking = null;\n  if (action === 'reply' && r.booking === 'book' && ctx.booking?.plan) {\n    const slot = offered.find((s) => s.id === r.slot || s.label === r.slot)\n      ?? slotAt(r.slot, ctx.booking.windows ?? [], ctx.booking.plan, profile, ctx.now ? new Date(ctx.now) : new Date(), r.language);\n    if (slot) booking = { action: 'book', plan: ctx.booking.plan, slot, replaces: ctx.booking.current ?? null };\n  } else if (action === 'reply' && r.booking === 'cancel' && ctx.booking?.current) {\n    booking = { action: 'cancel', current: ctx.booking.current };\n  }\n\n  return {\n    ok: true,\n    action,\n    reply,\n    handoff_reason: action === 'handoff' ? reason : null,\n    contact_patch: { name, email, phone, language: r.language, facts, stage, is_hot: isHot, opted_out: action === 'opt_out' },\n    missing,\n    events,\n    summary: r.summary,\n    quick_replies: quickReplies,\n    booking,\n  };\n}\n\nconst request = $('Build model request').first().json;\nconst row = $('Load context').first().json;\nconst res = parseTurnResponse(request.provider, request.model, $input.first().json);\nconst u = res.usage;\n\n// The answer is checked before anything is sent; an unusable one hands the conversation to the team.\nconst checked = res.error ? { ok: false, value: null, errors: [res.error] }\n  : res.stop_reason !== 'end_turn' ? { ok: false, value: null, errors: [`stop reason ${res.stop_reason}`] }\n  : parseAndValidate(res.text, request.schema);\nconst decision = decideTurn(checked, request.ctx, request.profile);\n\nreturn [{ json: {\n  decision,\n  ai: { provider: request.provider, model: res.model, input_tokens: u.input_tokens + u.cache_write_tokens + u.cache_read_tokens, output_tokens: u.output_tokens, cost_usd: turnCost(request.model, u), latency_ms: Date.now() - request.started_at, stop_reason: res.stop_reason, ok: checked.ok, error: checked.ok ? null : checked.errors.slice(0, 3).join('; ').slice(0, 500), result: checked.value ?? null },\n  reply_to: { channel: request.ctx.channel, external_id: row.reply_to?.external_id ?? null },\n  execution_id: $execution.id,\n} }];\n"
+      },
+      "id": "1febc2f6-4edb-4f4e-ad51-69f9d4681b3f",
+      "name": "Check AI answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "db8555dd-49cf-806b-e4ba-4e53fbd871df",
+                    "leftValue": "={{ $('Check AI answer').first().json.decision.booking?.action ?? 'none' }}",
+                    "rightValue": "book",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Book a time"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "eb5db348-3438-cf5a-8ce7-a96f7811386e",
+                    "leftValue": "={{ $('Check AI answer').first().json.decision.booking?.action ?? 'none' }}",
+                    "rightValue": "cancel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Cancel"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "No booking"
+        }
+      },
+      "id": "488f0873-0ded-4cb1-accb-c20e57e54cd2",
+      "name": "Booking?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        3960,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { timeMin: $('Check AI answer').first().json.decision.booking.slot.start, timeMax: $('Check AI answer').first().json.decision.booking.slot.end, items: [ { id: $('Check AI answer').first().json.decision.booking.plan.calendar_id } ] } }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "926b0680-125e-4fea-aba2-42c8ed31cace",
+      "name": "Calendar: check the time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        -100
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "laCredGCalendar1",
+          "name": "Google Calendar (agents)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7529969c-4972-90bb-da92-ed80f86b4e5b",
+              "leftValue": "={{ Array.isArray($json.calendars?.[$('Check AI answer').first().json.decision.booking.plan.calendar_id]?.busy) && !$json.calendars[$('Check AI answer').first().json.decision.booking.plan.calendar_id].busy.length }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "54f634ab-2e76-4e5b-a911-4c7a1a2cbb68",
+      "name": "Time still free?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4400,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($('Check AI answer').first().json.decision.booking.plan.calendar_id) + '/events?sendUpdates=none' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { summary: $('Check AI answer').first().json.decision.booking.plan.label + ': ' + ($('Check AI answer').first().json.decision.contact_patch?.name || $('Load context').first().json.contact.name || 'new lead'), location: $('Check AI answer').first().json.decision.booking.plan.where, description: [ $('Check AI answer').first().json.decision.summary, 'Phone: ' + ($('Check AI answer').first().json.decision.contact_patch?.phone || $('Load context').first().json.contact.phone || '-'), 'Email: ' + ($('Check AI answer').first().json.decision.contact_patch?.email || $('Load context').first().json.contact.email || '-'), 'Booked by the assistant in ' + $('Load context').first().json.reply_to?.channel + ' (conversation #' + $('Load context').first().json.conversation.id + ')' ].join('\\n'), start: { dateTime: $('Check AI answer').first().json.decision.booking.slot.start }, end: { dateTime: $('Check AI answer').first().json.decision.booking.slot.end } } }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "ab8cf815-2585-469a-a62e-9993a8d28901",
+      "name": "Calendar: book",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4620,
+        -200
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "laCredGCalendar1",
+          "name": "Google Calendar (agents)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "71605b8c-c60d-9db8-b3da-9bc341cf02c4",
+              "leftValue": "={{ !!$json.id && !!$('Check AI answer').first().json.decision.booking.replaces?.event_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "94cd2e18-ed70-4020-aaef-01d0f1fc9771",
+      "name": "Moving a booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4840,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($('Check AI answer').first().json.decision.booking.replaces.calendar_id) + '/events/' + $('Check AI answer').first().json.decision.booking.replaces.event_id + '?sendUpdates=none' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "e54ff143-1163-4cce-abec-d640f84174fd",
+      "name": "Calendar: remove old time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5060,
+        -300
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "laCredGCalendar1",
+          "name": "Google Calendar (agents)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent($('Check AI answer').first().json.decision.booking.current.calendar_id) + '/events/' + $('Check AI answer').first().json.decision.booking.current.event_id + '?sendUpdates=none' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "c15ed669-59ea-4d49-a0bd-b84ecd4d09b9",
+      "name": "Calendar: cancel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        300
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "laCredGCalendar1",
+          "name": "Google Calendar (agents)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const BUTTON_CHANNELS = ['telegram', 'whatsapp', 'messenger', 'instagram', 'web_chat'];\n\n// The turn as Save turn stores it, with the booking as the calendar took it. A time that was taken\n// since it was offered is not booked: the lead is offered the other times instead.\nconst turn = $('Check AI answer').first().json;\nconst d = turn.decision;\nif (d.booking?.action === 'book') {\n  const event = $('Calendar: book').isExecuted ? $('Calendar: book').first().json : null;\n  if (event?.id) {\n    d.booking.event_id = event.id;\n  } else {\n    const es = d.contact_patch?.language === 'es';\n    const others = ($('Build model request').first().json.ctx.booking?.slots ?? []).filter((s) => s.id !== d.booking.slot.id).map((s) => s.label);\n    const buttons = BUTTON_CHANNELS.includes(turn.reply_to?.channel) && others.length >= 2;\n    d.reply = others.length\n      ? (es ? 'Lo siento, ese horario se acaba de ocupar. ¿Te sirve alguno de estos?' : 'Sorry, that time was just taken. Would one of these work instead?') + (buttons ? '' : `\\n${others.join('\\n')}`)\n      : (es ? 'Lo siento, ese horario se acaba de ocupar. Un agente te contactará para acordar otro.' : 'Sorry, that time was just taken. An agent will contact you to find another one.');\n    d.quick_replies = buttons ? [...others.slice(0, 3), es ? 'Otro' : 'Other'] : [];\n    d.booking = null;\n  }\n}\nreturn [{ json: turn }];\n"
+      },
+      "id": "3ecf2213-e939-4016-a138-0abf22a53755",
+      "name": "Turn result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5280,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.apply_turn($1::bigint, $2::jsonb) AS r",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, $json ] }}"
+        }
+      },
+      "id": "3eb60b18-7d70-4af5-a22d-76d53589be36",
+      "name": "Save turn",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5500,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT CASE $2 WHEN 'book' THEN assistant.book_meeting($1::bigint, $3::jsonb) WHEN 'cancel' THEN assistant.cancel_booking($1::bigint) END AS booking",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, $('Turn result').first().json.decision.booking?.action ?? 'none', JSON.stringify($('Turn result').first().json.decision.booking?.action === 'book' ? { meeting: $('Turn result').first().json.decision.booking.plan.type, label: $('Turn result').first().json.decision.booking.plan.label, agent: $('Turn result').first().json.decision.booking.plan.agent, calendar_id: $('Turn result').first().json.decision.booking.plan.calendar_id, event_id: $('Turn result').first().json.decision.booking.event_id, start: $('Turn result').first().json.decision.booking.slot.start, end: $('Turn result').first().json.decision.booking.slot.end } : {}) ] }}"
+        }
+      },
+      "id": "37cd6992-75ca-4890-ab1d-6ba12db211f7",
+      "name": "Save booking",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        5720,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4bd952db-09e6-00df-46d3-7bfd792f74ec",
+              "leftValue": "={{ $('Save turn').first().json.r.send }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "cf05c3fb-ccb9-447d-ab75-58113eb14a0b",
+      "name": "Reply to send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5940,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "03e37e9f-85e5-49f8-a07e-910ea52e11b7",
+              "name": "message_id",
+              "value": "={{ $('Save turn').first().json.r.message_id }}",
+              "type": "number"
+            },
+            {
+              "id": "639daf89-3054-4573-ada8-0323206798a2",
+              "name": "quick_replies",
+              "value": "={{ $('Turn result').first().json.decision.quick_replies ?? [] }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f06b3312-1db5-4533-a90d-a57b2c7582ec",
+      "name": "Reply message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstSend0001"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "777ef4b7-9afc-4f49-a764-1ac37b610d1a",
+      "name": "Send reply",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1b797ffd-4c18-6fa9-3bfc-3fcb981159bc",
+              "leftValue": "={{ !!($('Turn result').first().json.decision.booking?.event_id || $('Turn result').first().json.decision.booking?.action === 'cancel') || $('Turn result').first().json.decision.events.some((e) => ['handoff', 'hot', 'opted_out'].includes(e.kind) || (e.kind === 'stage_changed' && e.data.to === 'qualified')) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "abb24e38-80eb-4544-a1df-251d29da6813",
+      "name": "Tell the team?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6600,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A Slack post for the team when something worth knowing happened in this turn. The first post\n// opens the conversation's thread; later ones go into it.\nconst CHANNELS = { telegram: 'Telegram', whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', web_chat: 'Website chat', email: 'Email', web_form: 'Website form', lead_ads: 'Facebook lead form' };\nconst config = $('Config').first().json;\nconst row = $('Load context').first().json;\nconst turn = $('Turn result').first().json;\nconst d = turn.decision;\nconst p = d.contact_patch ?? {};\nconst kinds = d.events.map((e) => e.kind);\nconst booked = d.booking?.action === 'book' && d.booking.event_id ? d.booking : null;\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\nconst channel = CHANNELS[row.reply_to?.channel] ?? row.reply_to?.channel ?? 'chat';\nconst name = p.name ?? row.contact.name ?? row.reply_to?.display_name ?? null;\n// Before the lead gives a name: \"Website chat lead\" in titles, \"the lead\" in sentences.\nconst label = name ?? `${channel} lead`;\nconst thread = row.conversation.slack_thread_ts;\n\nlet title;\nif (kinds.includes('handoff')) title = `🙋 Needs a person: ${label}`;\nelse if (kinds.includes('opted_out')) title = `🚫 Opted out: ${label}`;\nelse if (booked) title = `📅 ${booked.replaces ? 'Moved' : 'Booked'}: ${booked.plan.label} with ${booked.plan.agent}, ${booked.slot.label} (${label})`;\nelse if (d.booking?.action === 'cancel') title = `❌ Cancelled: ${d.booking.current.meeting} with ${d.booking.current.agent} (${label})`;\nelse if (kinds.includes('hot')) title = `🔥 Hot lead: ${label}`;\nelse title = `✅ Qualified lead: ${label}`;\n\nconst facts = Object.entries(p.facts ?? row.contact.facts ?? {}).filter(([k]) => k !== 'intent').map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`);\nconst reach = [p.phone ?? row.contact.phone, p.email ?? row.contact.email].filter(Boolean);\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150) } },\n  { type: 'section', text: { type: 'mrkdwn', text: esc(d.summary ?? 'The assistant could not read this turn; see the conversation.') } },\n  { type: 'section', fields: [\n    { type: 'mrkdwn', text: `*Wants*\\n${esc((p.facts ?? row.contact.facts ?? {}).intent ?? 'not clear yet')}` },\n    { type: 'mrkdwn', text: `*Reach at*\\n${esc(reach.join('\\n') || `${channel} only`)}` },\n    { type: 'mrkdwn', text: `*Details*\\n${esc(facts.join('\\n') || '—')}` },\n    { type: 'mrkdwn', text: `*Stage*\\n${esc(booked ? 'booked' : d.booking?.action === 'cancel' ? 'qualified' : p.stage ?? row.contact.stage)}` },\n  ] },\n];\nif (kinds.includes('handoff')) {\n  const recent = [...row.messages, { author: 'ai', text: d.reply }].slice(-6)\n    .map((m) => `${m.author === 'lead' ? `*${esc(name ?? 'Lead')}:*` : m.author === 'human' ? '*Team:*' : '*Assistant:*'} ${esc(String(m.text).slice(0, 300))}`);\n  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Why:* ${esc(d.handoff_reason ?? 'flagged by the assistant')}\\n\\n${recent.join('\\n')}` } });\n  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `The assistant has stopped answering. Reply in this thread to answer ${esc(name ?? 'the lead')} in ${channel}; \\`!ai\\` hands the conversation back. Messages starting with \\`//\\` stay internal.` } });\n} else if (!thread) {\n  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `The assistant keeps the conversation going. Reply in this thread to answer ${esc(name ?? 'the lead')} yourself; that pauses the assistant.` } });\n}\nblocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `${channel} · conversation #${row.conversation.id} · AI so far $${(Number(row.ai_cost_usd) + (turn.ai.cost_usd ?? 0)).toFixed(4)}` }] });\n\nconst post = { channel: config.slack_channel, text: title, blocks, unfurl_links: false };\nif (thread) Object.assign(post, { thread_ts: thread, reply_broadcast: kinds.includes('handoff') });\nreturn [{ json: post }];\n"
+      },
+      "id": "d75ee5bf-f2c9-432c-acef-3eef16598bd9",
+      "name": "Team message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6820,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "4e77c1ee-0883-4942-a8a3-b744ded2779b",
+      "name": "Slack: team update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7040,
+        0
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.conversations SET slack_thread_ts = coalesce(slack_thread_ts, nullif($2, '')) WHERE id = $1::bigint RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, $json.ok ? ($json.message?.thread_ts ?? $json.ts) : '' ] }}"
+        }
+      },
+      "id": "1265b13a-1f66-483f-a1b6-5f6cad853da4",
+      "name": "Remember thread",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        7260,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1f481276-37d7-493c-a18b-fec7c56e4038",
+              "name": "conversation_id",
+              "value": "={{ $('When called').first().json.conversation_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e156eb4a-f81c-46a4-a7f7-042d3fbaefa7",
+      "name": "CRM input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        7480,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstCrm00001"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "36d9cb1d-63c2-4eb6-a855-83e6651a373a",
+      "name": "Update CRM",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        7700,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assistant.finish_turn($1::bigint, $2::bigint) AS r",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, $('Claim turn').first().json.r.upto ] }}"
+        }
+      },
+      "id": "00947aaf-4010-4125-aa22-ca3aa27f7c0c",
+      "name": "Finish turn",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        7920,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6d29188f-8fea-76a9-35ef-2c373812aeb7",
+              "leftValue": "={{ $json.r.more }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "24e9134b-f9e0-4dbf-a84e-9c5958d4ea23",
+      "name": "More messages?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        8140,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1f481276-37d7-493c-a18b-fec7c56e4038",
+              "name": "conversation_id",
+              "value": "={{ $('When called').first().json.conversation_id }}",
+              "type": "number"
+            },
+            {
+              "id": "8bbbfb4d-d112-4e1b-a236-28d8325583a5",
+              "name": "message_id",
+              "value": "={{ $json.r.upto }}",
+              "type": "number"
+            },
+            {
+              "id": "ee96e5dc-5d83-496f-aa20-04b6f907f897",
+              "name": "debounce",
+              "value": "={{ true }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a5945708-1e27-4799-a1a3-791fa8d3cfd9",
+      "name": "Next turn input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        8360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstTurn0001"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "bc1bf4e6-c002-4dd7-ae55-8ebe41adb617",
+      "name": "Run next turn",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        8580,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "When called": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Wait for a burst?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for a burst?": {
+      "main": [
+        [
+          {
+            "node": "Wait for more messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for more messages": {
+      "main": [
+        [
+          {
+            "node": "Claim turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim turn": {
+      "main": [
+        [
+          {
+            "node": "Go?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Go?": {
+      "main": [
+        [
+          {
+            "node": "Load context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load lead message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to do",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load lead message": {
+      "main": [
+        [
+          {
+            "node": "Lead message to team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead message to team": {
+      "main": [
+        [
+          {
+            "node": "Slack: lead message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load context": {
+      "main": [
+        [
+          {
+            "node": "Telegram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram?": {
+      "main": [
+        [
+          {
+            "node": "Telegram: typing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read prompt files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: typing": {
+      "main": [
+        [
+          {
+            "node": "Read prompt files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read prompt files": {
+      "main": [
+        [
+          {
+            "node": "Read file text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read file text": {
+      "main": [
+        [
+          {
+            "node": "Booking plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking plan": {
+      "main": [
+        [
+          {
+            "node": "Free times needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Free times needed?": {
+      "main": [
+        [
+          {
+            "node": "Calendar: busy times",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build model request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar: busy times": {
+      "main": [
+        [
+          {
+            "node": "Build model request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build model request": {
+      "main": [
+        [
+          {
+            "node": "Provider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider": {
+      "main": [
+        [
+          {
+            "node": "Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "main": [
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude": {
+      "main": [
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI answer": {
+      "main": [
+        [
+          {
+            "node": "Booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking?": {
+      "main": [
+        [
+          {
+            "node": "Calendar: check the time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Calendar: cancel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Turn result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar: check the time": {
+      "main": [
+        [
+          {
+            "node": "Time still free?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time still free?": {
+      "main": [
+        [
+          {
+            "node": "Calendar: book",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Turn result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar: book": {
+      "main": [
+        [
+          {
+            "node": "Moving a booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Moving a booking?": {
+      "main": [
+        [
+          {
+            "node": "Calendar: remove old time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Turn result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar: remove old time": {
+      "main": [
+        [
+          {
+            "node": "Turn result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar: cancel": {
+      "main": [
+        [
+          {
+            "node": "Turn result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Turn result": {
+      "main": [
+        [
+          {
+            "node": "Save turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save turn": {
+      "main": [
+        [
+          {
+            "node": "Save booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save booking": {
+      "main": [
+        [
+          {
+            "node": "Reply to send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply to send?": {
+      "main": [
+        [
+          {
+            "node": "Reply message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tell the team?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply message": {
+      "main": [
+        [
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send reply": {
+      "main": [
+        [
+          {
+            "node": "Tell the team?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tell the team?": {
+      "main": [
+        [
+          {
+            "node": "Team message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CRM input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Team message": {
+      "main": [
+        [
+          {
+            "node": "Slack: team update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: team update": {
+      "main": [
+        [
+          {
+            "node": "Remember thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember thread": {
+      "main": [
+        [
+          {
+            "node": "CRM input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM input": {
+      "main": [
+        [
+          {
+            "node": "Update CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update CRM": {
+      "main": [
+        [
+          {
+            "node": "Finish turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finish turn": {
+      "main": [
+        [
+          {
+            "node": "More messages?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "More messages?": {
+      "main": [
+        [
+          {
+            "node": "Next turn input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next turn input": {
+      "main": [
+        [
+          {
+            "node": "Run next turn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

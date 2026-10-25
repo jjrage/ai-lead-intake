@@ -1,0 +1,37 @@
+# Public entry point. Caddy gets the TLS certificate for PUBLIC_HOST by itself and forwards
+# X-Forwarded-* headers (n8n trusts one proxy hop: N8N_PROXY_HOPS=1).
+# Only production webhooks and the health check reach n8n; the editor and its API stay private.
+# The demo business's home page and privacy policy (deploy/site/) are served as static files.
+
+{$PUBLIC_HOST} {
+	encode zstd gzip
+
+	handle / {
+		root * /srv/site
+		rewrite * /index.html
+		file_server
+	}
+
+	handle /privacy {
+		root * /srv/site
+		rewrite * /privacy.html
+		file_server
+	}
+
+	handle /webhook/* {
+		reverse_proxy n8n:5678
+	}
+
+	handle /healthz {
+		reverse_proxy n8n:5678
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

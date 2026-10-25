@@ -1,0 +1,619 @@
+{
+  "id": "LeadAsstChat0001",
+  "name": "Assistant · Website chat",
+  "description": "The demo page's chat: receives messages and serves replies plus the business view.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Website chat\nEndpoints for the demo page; **GET /webhook/dashboard?days=30** feeds its dashboard (aggregates only, no names). **POST /webhook/chat/message** `{ session, message_id, text }` stores the message (Ingest message starts the reply); the public demo has limits (**Config**: messages per chat session and in all, over 24 hours), past which it answers 429. **GET /webhook/chat/updates?session=…&after=…** returns new replies, whether a reply is being written, and the business view: the lead record and its events.",
+        "height": 200,
+        "width": 1000,
+        "color": 6
+      },
+      "id": "d119c2bb-3a81-4cf8-a6d4-48aefbf0967f",
+      "name": "Note: chat",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat/message",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "53249690-5e49-4643-ad3d-1b984e97ee32",
+      "name": "Chat message",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "cc96d96b-e31c-48fd-ae59-429389f4970d"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            },
+            {
+              "id": "b5c6240d-c6af-4bab-a567-5102c1362289",
+              "name": "session_limit",
+              "value": "={{ 40 }}",
+              "type": "number"
+            },
+            {
+              "id": "237895f5-eb9b-4ad8-a89b-a933cfc4d031",
+              "name": "day_limit",
+              "value": "={{ 800 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "49f29d96-e421-495c-a9e5-f0fc566c5265",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A message from the demo page's chat becomes the common inbound message. The page keeps a random\n// session id; each message carries its own id, so a retried POST is stored once.\nconst profile = $('Config').first().json.profile;\nconst b = $('Chat message').first().json.body ?? {};\nconst session = String(b.session ?? '');\nconst id = String(b.message_id ?? '');\nconst text = String(b.text ?? '').trim();\nconst valid = /^[A-Za-z0-9-]{16,64}$/.test(session) && /^[A-Za-z0-9-]{8,64}$/.test(id) && text.length > 0 && text.length <= 2000;\nif (!valid) return [{ json: { valid: false } }];\nreturn [{ json: {\n  valid: true,\n  profile,\n  channel: 'web_chat',\n  external_user_id: session,\n  external_message_id: id,\n  sent_at: new Date().toISOString(),\n  text,\n  attachments: [],\n  sender: { display_name: null, username: null, phone: null, email: null },\n  address: { session },\n} }];\n"
+      },
+      "id": "d689f978-7d4f-4632-ad74-881116130b94",
+      "name": "Normalize message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4beca02f-ddca-461e-53a6-c8012c1476a0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "942e47a5-b927-4776-a593-1b97837f771b",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) FILTER (WHERE identity_id = $1) AS session_count, count(*) AS all_count\nFROM assistant.messages\nWHERE channel = 'web_chat' AND direction = 'in' AND created_at > now() - interval '24 hours'",
+        "options": {
+          "queryReplacement": "={{ [ $json.external_user_id ] }}"
+        }
+      },
+      "id": "dcfb6b2a-0522-45bb-a122-0660be9cd6e3",
+      "name": "Count recent messages",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a7cf5bb9-ad54-d555-c066-30d80b042ced",
+              "leftValue": "={{ Number($json.session_count) < $('Config').first().json.session_limit && Number($json.all_count) < $('Config').first().json.day_limit }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "87fbb4f8-9e43-4823-a6fc-87e14897157c",
+      "name": "Within limits?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Normalize message').all();"
+      },
+      "id": "8bc3c5df-241b-4ba7-a671-d0e7edb81fd0",
+      "name": "The message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstIngest01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "9cc62343-e675-4cf6-aa99-2bb7a8e507fe",
+      "name": "Ingest message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":true}",
+        "options": {}
+      },
+      "id": "b3c0e2e8-64b1-418b-a19e-9c76efc6243b",
+      "name": "Respond: stored",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":false,\"error\":\"limit\"}",
+        "options": {
+          "responseCode": 429
+        }
+      },
+      "id": "dd59d9d9-f1c4-413a-a329-3db267c36bd3",
+      "name": "Respond: limit reached",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":false,\"error\":\"session, message_id and text (up to 2000 characters) are required\"}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "e57fa781-4d35-434d-a67e-6ee571107228",
+      "name": "Respond: bad request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "chat/updates",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "47300108-e1b2-4399-a5f2-97bdd928ee76",
+      "name": "Chat updates",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        400
+      ],
+      "webhookId": "b47f0c56-435b-47e7-aeca-3fc9b3b95bd7"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bd6bd090-0362-485b-a6f2-9aeb40e3cbba",
+      "name": "Config (updates)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- What the demo page shows for one chat session: replies after the last one it has (with the model\n-- call's time and cost), whether a reply is being written, and the business side: the lead record,\n-- where it went (CRM, Slack), what happened, and the AI cost so far.\nWITH i AS (SELECT * FROM assistant.identities WHERE profile = $1 AND channel = 'web_chat' AND external_id = $2),\nct AS (SELECT c.* FROM assistant.contacts c JOIN i ON c.id = i.contact_id),\nconv AS (SELECT v.* FROM assistant.conversations v JOIN ct ON v.contact_id = ct.id WHERE v.status = 'open')\nSELECT\n  (SELECT coalesce(json_agg(json_build_object('id', m.id, 'author', m.author, 'text', m.text, 'sent_at', m.sent_at,\n            'quick_replies', m.quick_replies, 'latency_ms', a.latency_ms, 'cost_usd', a.cost_usd) ORDER BY m.id), '[]')\n     FROM assistant.messages m JOIN assistant.conversations v ON v.id = m.conversation_id\n     LEFT JOIN assistant.ai_calls a ON a.id = m.ai_call_id\n     WHERE v.contact_id = (SELECT id FROM ct) AND m.channel = 'web_chat' AND m.identity_id = $2\n       AND m.direction = 'out' AND m.status = 'sent' AND m.id > $3::bigint) AS messages,\n  coalesce((SELECT turn_started_at > now() - interval '2 minutes' FROM conv), false) AS typing,\n  (SELECT mode FROM conv) AS mode,\n  (SELECT json_build_object('name', name, 'email', email, 'phone', phone, 'stage', stage, 'facts', facts, 'is_hot', is_hot,\n            'in_crm', crm_contact_id IS NOT NULL, 'crm_deal', crm_deal_id IS NOT NULL,\n            'in_slack', (SELECT slack_thread_ts IS NOT NULL FROM conv)) FROM ct) AS lead,\n  (SELECT json_build_object('replies', count(*), 'cost_usd', coalesce(sum(a.cost_usd), 0), 'avg_latency_ms', round(avg(a.latency_ms)))\n     FROM assistant.ai_calls a JOIN assistant.conversations v ON v.id = a.conversation_id\n     WHERE v.contact_id = (SELECT id FROM ct)) AS ai,\n  (SELECT coalesce(json_agg(json_build_object('kind', e.kind, 'data', e.data, 'at', e.created_at) ORDER BY e.id), '[]')\n     FROM assistant.events e WHERE e.contact_id = (SELECT id FROM ct)) AS events",
+        "options": {
+          "queryReplacement": "={{ [ $json.profile, String($('Chat updates').first().json.query.session ?? '').slice(0, 64), Number($('Chat updates').first().json.query.after) || 0 ] }}"
+        }
+      },
+      "id": "803e0305-97a2-41b6-ad9d-3510b0bc0fe6",
+      "name": "Load updates",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "90c176f7-070c-44c0-a883-5cf24227e18b",
+      "name": "Respond: updates",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dashboard",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "d4af61ca-caa1-445b-aba2-2560bef0b7f2",
+      "name": "Dashboard",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        700
+      ],
+      "webhookId": "66cd9688-a2ae-4682-a4ea-01e70f0e230f"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            },
+            {
+              "id": "57d225f5-5d67-4b96-a4ee-189c72b1ed97",
+              "name": "timezone",
+              "value": "America/Phoenix",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3a6c3b2f-e00b-4549-aded-d74105d015f5",
+      "name": "Config (dashboard)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The demo page's dashboard: leads of the last $1 days (profile $2, days in time zone $3) by channel\n-- and day, how far they got (qualified, booked, showed: the furthest stage reached, so a later no-show\n-- still counts as booked), time to the first reply, AI cost, follow-ups, and the latest leads without\n-- names.\nWITH leads AS (\n  SELECT c.id, c.stage, c.facts->>'intent' AS intent, c.created_at, c.opted_out_at,\n         (SELECT m.channel FROM assistant.messages m JOIN assistant.conversations v ON v.id = m.conversation_id\n          WHERE v.contact_id = c.id AND m.direction = 'in' ORDER BY m.sent_at, m.id LIMIT 1) AS channel\n  FROM assistant.contacts c\n  WHERE c.profile = $2 AND c.merged_into IS NULL AND c.created_at > now() - make_interval(days => $1)\n),\nfirst_reply AS (\n  SELECT v.contact_id, extract(epoch FROM\n           (SELECT min(o.sent_at) FROM assistant.messages o WHERE o.conversation_id = v.id AND o.direction = 'out' AND o.status IN ('sent', 'drafted'))\n         - (SELECT min(i.sent_at) FROM assistant.messages i WHERE i.conversation_id = v.id AND i.direction = 'in')) AS seconds\n  FROM assistant.conversations v WHERE v.contact_id IN (SELECT id FROM leads)\n),\nreached AS (\n  SELECT l.id,\n         bool_or(e.data->>'to' IN ('qualified', 'booked', 'showed', 'no_show')) OR l.stage IN ('qualified', 'booked', 'showed', 'no_show') AS qualified,\n         bool_or(e.data->>'to' IN ('booked', 'showed', 'no_show')) OR l.stage IN ('booked', 'showed', 'no_show') AS booked,\n         bool_or(e.data->>'to' = 'showed') OR l.stage = 'showed' AS showed\n  FROM leads l LEFT JOIN assistant.events e ON e.contact_id = l.id AND e.kind = 'stage_changed'\n  GROUP BY l.id, l.stage\n),\ncost AS (\n  SELECT v.contact_id, sum(a.cost_usd) AS usd FROM assistant.ai_calls a JOIN assistant.conversations v ON v.id = a.conversation_id\n  WHERE v.contact_id IN (SELECT id FROM leads) GROUP BY v.contact_id\n)\nSELECT json_build_object(\n  'days', $1,\n  'leads', (SELECT count(*) FROM leads),\n  'by_channel', (SELECT coalesce(json_agg(json_build_object('channel', channel, 'leads', n) ORDER BY n DESC, channel), '[]')\n                 FROM (SELECT coalesce(channel, 'unknown') AS channel, count(*) AS n FROM leads GROUP BY 1) s),\n  'by_day', (SELECT json_agg(json_build_object('day', d::date, 'leads', (SELECT count(*) FROM leads WHERE (created_at AT TIME ZONE $3)::date = d::date)) ORDER BY d)\n             FROM generate_series((now() AT TIME ZONE $3)::date - 13, (now() AT TIME ZONE $3)::date, interval '1 day') d),\n  'funnel', (SELECT json_build_object('leads', count(*), 'qualified', count(*) FILTER (WHERE qualified),\n                                      'booked', count(*) FILTER (WHERE booked), 'showed', count(*) FILTER (WHERE showed)) FROM reached),\n  'first_reply', (SELECT json_build_object('median_s', percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds), 'p90_s', percentile_cont(0.9) WITHIN GROUP (ORDER BY seconds))\n                  FROM first_reply WHERE seconds IS NOT NULL),\n  'ai', (SELECT json_build_object('per_lead_usd', avg(usd), 'total_usd', coalesce(sum(usd), 0)) FROM cost),\n  'follow_ups', (SELECT json_build_object('leads', count(*) FILTER (WHERE followed_up_at IS NOT NULL),\n                                          'replied', count(*) FILTER (WHERE followed_up_at IS NOT NULL AND last_inbound_at > followed_up_at))\n                 FROM assistant.conversations WHERE contact_id IN (SELECT id FROM leads)),\n  'handoffs', (SELECT count(DISTINCT contact_id) FROM assistant.events WHERE kind = 'handoff' AND contact_id IN (SELECT id FROM leads)),\n  'opted_out', (SELECT count(*) FROM leads WHERE opted_out_at IS NOT NULL),\n  'recent', (SELECT coalesce(json_agg(r ORDER BY r.at DESC), '[]') FROM (\n               SELECT l.channel, l.intent, l.stage, l.created_at AS at, round(fr.seconds) AS first_reply_s, c.usd AS ai_usd\n               FROM leads l LEFT JOIN LATERAL (SELECT min(seconds) AS seconds FROM first_reply WHERE contact_id = l.id) fr ON true\n               LEFT JOIN cost c ON c.contact_id = l.id ORDER BY l.created_at DESC LIMIT 8) r)\n) AS dashboard",
+        "options": {
+          "queryReplacement": "={{ [ Math.min(Math.max(Number($('Dashboard').first().json.query.days) || 30, 1), 90), $json.profile, $json.timezone ] }}"
+        }
+      },
+      "id": "a0bbb63c-4f73-4311-a67c-e77d3f129ee9",
+      "name": "Load dashboard",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        700
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.dashboard }}",
+        "options": {}
+      },
+      "id": "502aa75f-280f-419a-adf9-bdcc1120b3d8",
+      "name": "Respond: dashboard",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Chat message": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize message": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Count recent messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: bad request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count recent messages": {
+      "main": [
+        [
+          {
+            "node": "Within limits?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within limits?": {
+      "main": [
+        [
+          {
+            "node": "The message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: limit reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "The message": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest message": {
+      "main": [
+        [
+          {
+            "node": "Respond: stored",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat updates": {
+      "main": [
+        [
+          {
+            "node": "Config (updates)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (updates)": {
+      "main": [
+        [
+          {
+            "node": "Load updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load updates": {
+      "main": [
+        [
+          {
+            "node": "Respond: updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dashboard": {
+      "main": [
+        [
+          {
+            "node": "Config (dashboard)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (dashboard)": {
+      "main": [
+        [
+          {
+            "node": "Load dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load dashboard": {
+      "main": [
+        [
+          {
+            "node": "Respond: dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

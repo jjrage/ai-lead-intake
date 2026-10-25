@@ -1,0 +1,985 @@
+{
+  "id": "LeadAsstCrm00001",
+  "name": "Assistant · CRM",
+  "description": "Keeps the CRM (HubSpot, GoHighLevel or both, per the business profile) in step with the conversation.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Keep the CRM up to date\nCalled at the end of every reply turn. A person gets a CRM record once they have given a phone number or email (people are merged across channels before that, so the CRM gets one record per person). The business profile's `crm.providers` picks the CRM: HubSpot (here), GoHighLevel (**Assistant · CRM (GoHighLevel)**), or both.\nHubSpot: contact found by email or phone, never duplicated; one deal per person, its stage follows the conversation (stage map in the profile); one note per conversation, rewritten with the summary, the details collected and the transcript.",
+        "height": 240,
+        "width": 1500,
+        "color": 6
+      },
+      "id": "6c1c9300-803d-4bfb-a03d-0952c82a6e3f",
+      "name": "Note: crm",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "9f02170a-e5c1-443f-aa75-929e8130d3e1",
+      "name": "When called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The person, their conversation and its transcript (every channel), for the CRM record.\nWITH conv AS (SELECT * FROM assistant.conversations WHERE id = $1::bigint),\nct AS (SELECT c.* FROM assistant.contacts c JOIN conv ON c.id = conv.contact_id)\nSELECT (SELECT row_to_json(ct) FROM ct) AS contact,\n       (SELECT row_to_json(conv) FROM conv) AS conversation,\n       (SELECT coalesce(json_agg(t ORDER BY t.sent_at, t.id), '[]') FROM (\n          SELECT m.id, m.author, m.channel, m.text, m.sent_at\n          FROM assistant.messages m JOIN assistant.conversations v ON v.id = m.conversation_id\n          WHERE v.contact_id = (SELECT id FROM ct) AND m.status IN ('received', 'sent')\n          ORDER BY m.sent_at DESC, m.id DESC LIMIT 60) t) AS messages,\n       (SELECT result->>'summary' FROM assistant.ai_calls WHERE conversation_id = $1::bigint AND ok ORDER BY id DESC LIMIT 1) AS summary,\n       (SELECT coalesce(sum(cost_usd), 0) FROM assistant.ai_calls WHERE conversation_id = $1::bigint) AS ai_cost_usd",
+        "options": {
+          "queryReplacement": "={{ [ $json.conversation_id ] }}"
+        }
+      },
+      "id": "69b4d968-f80f-4934-acee-9c95a2ada73c",
+      "name": "Load lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dad58d5a-0d38-0353-465c-58076ec77c2d",
+              "leftValue": "={{ !!($json.contact.phone || $json.contact.email) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9f0188db-2454-428c-a299-f8f1faaa07a2",
+      "name": "Reachable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "9ca1086e-6e1b-4f51-aa36-99cd72693666",
+      "name": "Not reachable yet: skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        660,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ '/home/node/.n8n-files/profiles/' + $json.contact.profile + '.json' }}",
+        "options": {}
+      },
+      "id": "165cbc79-73e0-4127-a2ab-4bd2149d84d4",
+      "name": "Read profile",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "data",
+        "destinationKey": "text",
+        "options": {}
+      },
+      "id": "a941d7c1-6944-4d9c-a1e5-4e915aae21b7",
+      "name": "Read profile text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8d1c5c5a-d7b0-4e8c-4505-218c024d6f3e",
+              "leftValue": "={{ (JSON.parse($('Read profile text').first().json.text).crm?.providers ?? ['hubspot']).includes('hubspot') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "4af138ee-b8cb-4769-a370-73598a9f1044",
+      "name": "HubSpot on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0aa5231f-5e6e-268e-2603-9e306bae750c",
+              "leftValue": "={{ (JSON.parse($('Read profile text').first().json.text).crm?.providers ?? ['hubspot']).includes('gohighlevel') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "85d3be22-7ae9-4552-ac7a-ceee31ee03e2",
+      "name": "GoHighLevel on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1f481276-37d7-493c-a18b-fec7c56e4038",
+              "name": "conversation_id",
+              "value": "={{ $('When called').first().json.conversation_id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d0d8ec2f-2f07-4bdb-a15f-1b9500fd83e0",
+      "name": "GoHighLevel input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1320,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstCrmGhl01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "fbab2bab-6370-434c-a157-9741d07b8b6b",
+      "name": "Update GoHighLevel",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        360
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function crmRecord(row, profile) {\n  const CHANNELS = { telegram: 'Telegram', whatsapp: 'WhatsApp', messenger: 'Messenger', instagram: 'Instagram', web_chat: 'Website chat', email: 'Email', web_form: 'Website form', lead_ads: 'Facebook lead form' };\n  const c = row.contact;\n  const facts = c.facts ?? {};\n  const [first, ...rest] = String(c.name ?? '').trim().split(/\\s+/).filter(Boolean);\n  // \"$650k\", \"$400k-$500k\", \"1.2M\": the top of the stated range.\n  const amounts = String(facts.budget ?? '').toLowerCase().replace(/,/g, '').match(/\\d+(?:\\.\\d+)?\\s*[km]?/g) ?? [];\n  const values = amounts.map((a) => parseFloat(a) * (a.endsWith('m') ? 1e6 : a.endsWith('k') ? 1e3 : 1)).filter((n) => n >= 1000);\n  const intent = profile.intents[facts.intent]?.label ?? 'New inquiry';\n  // A seller's deal is about the home they sell; anyone else's, about where they want to be.\n  const place = facts.intent === 'sell' ? (facts.property_area ?? facts.area) : (facts.area ?? facts.property_area);\n  const time = (t) => new Intl.DateTimeFormat('en-US', { timeZone: profile.business.timezone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t));\n  const who = { lead: c.name || 'Lead', ai: profile.assistant.name, human: 'Team' };\n  return {\n    first_name: first ?? null,\n    last_name: rest.join(' ') || null,\n    intent,\n    deal_name: `${c.name || 'Lead'} – ${intent}${place ? `, ${place}` : ''}`.slice(0, 200),\n    amount: values.length && facts.intent !== 'rent' ? Math.max(...values) : null,\n    details: Object.entries(facts).filter(([k]) => k !== 'intent').map(([k, v]) => [k.replace(/_/g, ' '), String(v)]),\n    channels: [...new Set(row.messages.map((m) => CHANNELS[m.channel] ?? m.channel))],\n    transcript: row.messages.map((m) => ({ time: time(m.sent_at), who: who[m.author] ?? m.author, text: m.text })),\n  };\n}\n\n// Contact, deal and transcript note for HubSpot, from what the assistant has learned (crmRecord()\n// in core/assistant.mjs, shared with the GoHighLevel adapter).\nconst profile = JSON.parse($('Read profile text').first().json.text);\nconst row = $('Load lead').first().json;\nconst c = row.contact;\nconst r = crmRecord(row, profile);\nconst esc = (s) => String(s ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);\n\nconst contactProperties = {};\nfor (const [k, v] of Object.entries({ firstname: r.first_name, lastname: r.last_name, email: c.email, phone: c.phone })) if (v) contactProperties[k] = v;\nconst filterGroups = [];\nif (c.email) filterGroups.push({ filters: [{ propertyName: 'email', operator: 'EQ', value: c.email }] });\nif (c.phone) filterGroups.push({ filters: [{ propertyName: 'phone', operator: 'EQ', value: c.phone }] });\n\nconst stages = profile.crm.hubspot.pipeline_stages;\nconst dealProperties = { dealname: r.deal_name, pipeline: 'default', dealstage: stages[c.stage] ?? stages.new };\nif (r.amount) dealProperties.amount = String(r.amount);\n\nconst noteBody = [\n  `<p><b>${c.is_hot ? '🔥 Hot lead. ' : ''}${esc(row.summary ?? 'Conversation with the assistant.')}</b></p>`,\n  `<ul><li>Wants: ${esc(r.intent)}</li>${r.details.map(([k, v]) => `<li>${esc(k)}: ${esc(v)}</li>`).join('')}<li>Stage: ${esc(c.stage)}</li>`,\n  c.opted_out_at ? '<li>Asked not to be contacted</li>' : '',\n  row.conversation.mode === 'human' ? `<li>Handled by the team: ${esc(row.conversation.handoff_reason ?? '')}</li>` : '',\n  `</ul><p><b>Conversation</b> (${esc(r.channels.join(', '))})<br>`,\n  r.transcript.map((m) => `[${m.time}] <b>${esc(m.who)}:</b> ${esc(m.text)}`).join('<br>'),\n  `</p><p><i>AI Lead Assistant · conversation #${row.conversation.id} · AI cost $${Number(row.ai_cost_usd).toFixed(4)}</i></p>`,\n].join('');\n\nreturn [{ json: { contact_id: c.id, crm_contact_id: c.crm_contact_id, crm_deal_id: c.crm_deal_id, crm_note_id: row.conversation.crm_note_id, search: { filterGroups, properties: ['email', 'phone', 'firstname', 'lastname'], limit: 1 }, contactProperties, dealProperties, noteBody } }];\n"
+      },
+      "id": "3cf2cdb8-2cec-46f4-a941-1153475c0185",
+      "name": "Prepare CRM records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a2a38467-86a3-00ea-0b4d-4f6e0e3f4108",
+              "leftValue": "={{ !!$json.crm_contact_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "d34f3618-5325-46c2-a425-acb821ab8d31",
+      "name": "Contact in CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.hubapi.com/crm/v3/objects/contacts/' + $json.crm_contact_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: $json.contactProperties } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "bbd22671-5f04-4f90-a8ce-08df4ba220b8",
+      "name": "HubSpot: update contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -120
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.search }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "f516b112-3e6b-4ffb-ae92-bb352f482e09",
+      "name": "HubSpot: find contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        100
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update the contact the search found (only filling empty fields), or create one. With an email,\n// create goes through upsert-by-email, so a contact HubSpot hasn't indexed for search yet is not duplicated.\nconst crm = $('Prepare CRM records').first().json;\nconst found = $input.first().json.results?.[0] ?? null;\nconst base = 'https://api.hubapi.com/crm/v3/objects/contacts';\nconst props = crm.contactProperties;\nlet request;\nif (found) {\n  const current = found.properties ?? {};\n  const fill = Object.fromEntries(Object.entries(props).filter(([k]) => !current[k]));\n  // HubSpot rejects an empty PATCH; with nothing to add, just read the contact back.\n  request = Object.keys(fill).length\n    ? { method: 'PATCH', url: `${base}/${found.id}`, body: { properties: fill } }\n    : { method: 'POST', url: `${base}/batch/read`, body: { inputs: [{ id: found.id }], properties: ['email'] } };\n} else if (props.email) {\n  request = { method: 'POST', url: `${base}/batch/upsert`, body: { inputs: [{ idProperty: 'email', id: props.email, properties: { ...props, hs_lead_status: 'NEW', lifecyclestage: 'lead' } }] } };\n} else {\n  request = { method: 'POST', url: base, body: { properties: { ...props, hs_lead_status: 'NEW', lifecyclestage: 'lead' } } };\n}\nreturn [{ json: request }];\n"
+      },
+      "id": "95e11f8b-4b96-4ff2-aae1-2cd3b2e8f5ae",
+      "name": "Prepare contact save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "6cf22781-1192-4e00-a2bd-f5c80fbc1029",
+      "name": "HubSpot: save contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        100
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.contacts SET crm_contact_id = $2, updated_at = now() WHERE id = $1::bigint\nRETURNING crm_contact_id, crm_deal_id",
+        "options": {
+          "queryReplacement": "={{ [ $('Prepare CRM records').first().json.contact_id, String($json.results?.[0]?.id ?? $json.id) ] }}"
+        }
+      },
+      "id": "db4007cf-301f-48f7-a629-8542e1bc71ef",
+      "name": "Remember contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2420,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b24ff5b3-a725-ced9-2926-9432133168c6",
+              "leftValue": "={{ !!$json.crm_deal_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "64a0b848-017f-4703-ab07-52f1b0cad41c",
+      "name": "Deal in CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.hubapi.com/crm/v3/objects/deals/' + $json.crm_deal_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: $('Prepare CRM records').first().json.dealProperties } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "f290c617-dc0e-4de9-a28d-33361dad728c",
+      "name": "HubSpot: update deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        -120
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/deals",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: $('Prepare CRM records').first().json.dealProperties, associations: [{ to: { id: $json.crm_contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 3 }] }] } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "e63fe3e4-efab-41cd-af83-7f2cf3e985c2",
+      "name": "HubSpot: create deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        100
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.contacts SET crm_deal_id = $2, updated_at = now() WHERE id = $1::bigint RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('Prepare CRM records').first().json.contact_id, String($json.id) ] }}"
+        }
+      },
+      "id": "cc605c52-3ac7-4159-a357-668561d7035a",
+      "name": "Remember deal",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3080,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.crm_contact_id, c.crm_deal_id, v.crm_note_id\nFROM assistant.contacts c JOIN assistant.conversations v ON v.contact_id = c.id\nWHERE c.id = $1::bigint AND v.id = $2::bigint",
+        "options": {
+          "queryReplacement": "={{ [ $('Prepare CRM records').first().json.contact_id, $('When called').first().json.conversation_id ] }}"
+        }
+      },
+      "id": "afb47c77-fde9-43dd-a50f-18d2bdb5d44c",
+      "name": "CRM ids",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3300,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d6409574-bec7-71df-d4c3-a37a9df58710",
+              "leftValue": "={{ !!$json.crm_note_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "33f0acc0-bc96-4196-a88f-64b1432fa917",
+      "name": "Note in CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.hubapi.com/crm/v3/objects/notes/' + $json.crm_note_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: { hs_note_body: $('Prepare CRM records').first().json.noteBody } } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "69fb568b-8003-47af-a7fc-a75fee404f7d",
+      "name": "HubSpot: update note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        -120
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/notes",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { properties: { hs_timestamp: new Date().toISOString(), hs_note_body: $('Prepare CRM records').first().json.noteBody }, associations: [{ to: { id: $json.crm_contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }] }, { to: { id: $json.crm_deal_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 214 }] }] } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "60391ec2-5083-46ad-ab51-8a07bf982899",
+      "name": "HubSpot: create note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        100
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "liCredHubspot001",
+          "name": "HubSpot Service Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.conversations SET crm_note_id = $2 WHERE id = $1::bigint RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('When called').first().json.conversation_id, String($json.id) ] }}"
+        }
+      },
+      "id": "eb1b0b1b-1e2b-4e2a-a27f-ebc308e8963e",
+      "name": "Remember note",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3960,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When called": {
+      "main": [
+        [
+          {
+            "node": "Load lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load lead": {
+      "main": [
+        [
+          {
+            "node": "Reachable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reachable?": {
+      "main": [
+        [
+          {
+            "node": "Read profile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Not reachable yet: skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read profile": {
+      "main": [
+        [
+          {
+            "node": "Read profile text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read profile text": {
+      "main": [
+        [
+          {
+            "node": "HubSpot on?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "GoHighLevel on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot on?": {
+      "main": [
+        [
+          {
+            "node": "Prepare CRM records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare CRM records": {
+      "main": [
+        [
+          {
+            "node": "Contact in CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoHighLevel on?": {
+      "main": [
+        [
+          {
+            "node": "GoHighLevel input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GoHighLevel input": {
+      "main": [
+        [
+          {
+            "node": "Update GoHighLevel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact in CRM?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: update contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: find contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: find contact": {
+      "main": [
+        [
+          {
+            "node": "Prepare contact save",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare contact save": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: save contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: update contact": {
+      "main": [
+        [
+          {
+            "node": "Remember contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: save contact": {
+      "main": [
+        [
+          {
+            "node": "Remember contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember contact": {
+      "main": [
+        [
+          {
+            "node": "Deal in CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deal in CRM?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: update deal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: create deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: create deal": {
+      "main": [
+        [
+          {
+            "node": "Remember deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: update deal": {
+      "main": [
+        [
+          {
+            "node": "CRM ids",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember deal": {
+      "main": [
+        [
+          {
+            "node": "CRM ids",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM ids": {
+      "main": [
+        [
+          {
+            "node": "Note in CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Note in CRM?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: update note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: create note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: create note": {
+      "main": [
+        [
+          {
+            "node": "Remember note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

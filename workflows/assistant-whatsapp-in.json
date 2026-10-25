@@ -1,0 +1,277 @@
+{
+  "id": "LeadAsstWaIn0001",
+  "name": "Assistant · WhatsApp in",
+  "description": "Receives WhatsApp messages to the business number and hands them to Ingest message.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WhatsApp\nMessages to the business number (WhatsApp Cloud API). When the workflow is published, the trigger registers this webhook with the Meta app; it then checks every event's signature with the app secret. Each message is turned into the common format and stored by **Ingest message**; the reply comes from **Reply turn**.\nOf the delivery statuses only failures come through: the message is marked failed with WhatsApp's reason and the team is told in Slack.",
+        "height": 200,
+        "width": 900,
+        "color": 6
+      },
+      "id": "01d7d166-147d-468e-aa25-888bc604aa07",
+      "name": "Note: whatsapp",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {
+          "messageStatusUpdates": [
+            "failed"
+          ]
+        }
+      },
+      "id": "57f41bd0-badd-48a9-ae92-b98e61f705b1",
+      "name": "WhatsApp event",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "laCredWaTrigger1",
+          "name": "WhatsApp app (webhooks)"
+        }
+      },
+      "webhookId": "b3255c1f-b57d-4cc6-aebe-0ddeaedc9390"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3c556f3d-f890-413d-a818-d3ec5e0b2384",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A WhatsApp Cloud API \"messages\" event becomes the common inbound message. The person is keyed by\n// their business-scoped user id (BSUID, in every message since 2026); WhatsApp adds the phone number\n// unless the person hides it behind a username, and the phone lets Ingest match other channels.\nconst profile = $('Config').first().json.profile;\nconst out = [];\nfor (const item of $('WhatsApp event').all()) {\n  const v = item.json;\n  if (v.field !== 'messages') continue;\n  for (const m of v.messages ?? []) {\n    if (m.group_id || ['reaction', 'system', 'order'].includes(m.type)) continue;  // direct messages only\n    const who = (v.contacts ?? []).find((c) => (m.from_user_id && c.user_id === m.from_user_id) || (m.from && c.wa_id === m.from)) ?? v.contacts?.[0] ?? {};\n    const userId = m.from_user_id ?? who.user_id ?? null;\n    const phone = m.from ?? who.wa_id ?? null;\n    if (!userId && !phone) continue;\n    const media = m.image ?? m.document ?? m.audio ?? m.video ?? m.sticker;\n    const attachments = media ? [{ type: { document: 'file', sticker: 'image' }[m.type] ?? m.type, media_id: media.id, name: media.filename ?? null }] : [];\n    const loc = m.location;\n    let text = {\n      text: m.text?.body,\n      button: m.button?.text,\n      interactive: m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title,\n      location: loc && `(shared a location: ${[loc.name, loc.address].filter(Boolean).join(', ') || `${loc.latitude}, ${loc.longitude}`})`,\n      contacts: m.contacts && `(shared a contact: ${m.contacts.map((c) => [c.name?.formatted_name, ...(c.phones ?? []).map((p) => p.phone)].filter(Boolean).join(' ')).join('; ')})`,\n      request_welcome: '(opened the chat)',\n      unsupported: '(sent a message type the assistant cannot read)',\n    }[m.type] ?? media?.caption ?? '';\n    text = String(text).trim();\n    if (!text && attachments.length) text = `(sent ${attachments.map((a) => a.type).join(', ')})`;\n    if (!text) continue;\n    out.push({ json: {\n      profile,\n      channel: 'whatsapp',\n      external_user_id: userId ?? phone,\n      external_message_id: m.id,\n      sent_at: new Date(Number(m.timestamp) * 1000).toISOString(),\n      text,\n      attachments,\n      sender: { display_name: who.profile?.name ?? null, username: who.profile?.username ?? null, phone: phone ? `+${String(phone).replace(/\\D/g, '')}` : null, email: null },\n      // Replies go to the phone number when WhatsApp shared it, otherwise to the BSUID.\n      address: { phone_number_id: v.metadata?.phone_number_id, to: phone, user_id: userId },\n    } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "b95b4c14-899d-4983-a425-e24208ff6cd2",
+      "name": "Normalize message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstIngest01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "3e383cc4-d83e-4b15-a59f-b166119328df",
+      "name": "Ingest message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// WhatsApp accepts a message when it is sent and reports later if it could not deliver it (a template\n// to someone it cannot reach, for example). Those reports, with WhatsApp's reason, mark the message failed.\nconst out = [];\nfor (const item of $('WhatsApp event').all()) {\n  for (const s of item.json.statuses ?? []) {\n    if (s.status !== 'failed') continue;\n    const e = s.errors?.[0] ?? {};\n    const reason = [e.code, e.title, e.error_data?.details ?? e.message].filter(Boolean).join(' · ') || 'no reason given';\n    out.push({ json: { provider_id: s.id, error: `not delivered by WhatsApp: ${reason}`.slice(0, 1000) } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "0b06901c-9044-4452-afa9-5437b58aed75",
+      "name": "Failed deliveries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.messages SET status = 'failed', error = $2 WHERE provider_id = $1 RETURNING id, conversation_id, channel, error",
+        "options": {
+          "queryReplacement": "={{ [ $json.provider_id, $json.error ] }}"
+        }
+      },
+      "id": "1c5bc892-7eb6-479b-aac3-47834d00b065",
+      "name": "Mark failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter((item) => item.json.conversation_id);"
+      },
+      "id": "714e4dce-e5f8-4fab-a935-e08929659bc3",
+      "name": "Our messages only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { channel: 'C0CCMJZMVSL', text: '⚠️ A message in conversation #' + $json.conversation_id + ' (' + $json.channel + ') was ' + $json.error } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "e6444e44-2045-4488-a78b-9be10cd3b5bf",
+      "name": "Slack: not delivered",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        200
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "WhatsApp event": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Failed deliveries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize message": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Failed deliveries": {
+      "main": [
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark failed": {
+      "main": [
+        [
+          {
+            "node": "Our messages only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Our messages only": {
+      "main": [
+        [
+          {
+            "node": "Slack: not delivered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

@@ -1,0 +1,385 @@
+{
+  "id": "LeadAsstFormIn01",
+  "name": "Assistant · Website form",
+  "description": "Receives the business website's contact form and hands it to Ingest message.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Website form\n**POST /webhook/form** `{ form_id, name, email, phone, message }` from the contact form on the business website. A valid submission is stored by **Ingest message** like any other message; the reply is a Gmail **draft** to the person's email (see Send message). Limits for the public site (**Config**, over 24 hours): per email address and in all, past which it answers 429.",
+        "height": 200,
+        "width": 1100,
+        "color": 6
+      },
+      "id": "b5b86769-b28f-4973-a406-c3ff6da4c598",
+      "name": "Note: form",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "form",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c43bf761-8429-4a0d-a37e-ae0acddcabbf",
+      "name": "Form submission",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "92ed8ebd-60f0-4774-a0fd-598510f19ae3"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            },
+            {
+              "id": "877d3953-da89-4c7f-a511-cbff766c0f0b",
+              "name": "per_email_limit",
+              "value": "={{ 5 }}",
+              "type": "number"
+            },
+            {
+              "id": "70a608c6-dc79-4880-aede-4a9e6afb5952",
+              "name": "day_limit",
+              "value": "={{ 200 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "313aa93f-73e7-4af5-a80c-335c0c1ee184",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function normalizePhone(raw) {\n  const digits = String(raw ?? '').replace(/\\D/g, '');\n  if (digits.length < 10) return null;\n  return digits.length === 10 ? `+1${digits}` : `+${digits}`;\n}\n\nfunction normalizeEmail(raw) {\n  const s = String(raw ?? '').trim().toLowerCase();\n  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(s) ? s : null;\n}\n\n// The website's contact form becomes the common inbound message. The person typed their name, email\n// and phone, so Ingest stores them, and finds the person again when they answer the reply by email.\n// A filled-in hidden \"website\" field means a bot.\nconst profile = $('Config').first().json.profile;\nconst b = $('Form submission').first().json.body ?? {};\nconst field = (v, max) => String(v ?? '').trim().slice(0, max);\nconst name = field(b.name, 100);\nconst email = normalizeEmail(b.email);\nconst phone = normalizePhone(b.phone);\nconst message = field(b.message, 2000);\nconst id = field(b.form_id, 64);\nif (field(b.website, 200) || !email || !message || !/^[A-Za-z0-9-]{8,64}$/.test(id)) return [{ json: { valid: false } }];\nconst answers = [['name', name], ['email', email], ['phone', phone], ['message', message]].filter(([, v]) => v);\nreturn [{ json: {\n  valid: true,\n  profile,\n  channel: 'web_form',\n  external_user_id: email,\n  external_message_id: id,\n  sent_at: new Date().toISOString(),\n  text: `(sent the contact form on the website: ${answers.map(([k, v]) => `${k}: ${v}`).join('; ')})`,\n  attachments: [],\n  sender: { name: name || null, display_name: name || null, username: null, phone, email },\n  address: { email },\n} }];\n"
+      },
+      "id": "6ed5fb2d-a704-4339-a023-c4478d03f3fd",
+      "name": "Normalize form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4beca02f-ddca-461e-53a6-c8012c1476a0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "5cf85e90-30f7-4b70-a1dc-7b29a81b1f2e",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*) FILTER (WHERE identity_id = $1) AS email_count, count(*) AS all_count\nFROM assistant.messages\nWHERE channel = 'web_form' AND direction = 'in' AND created_at > now() - interval '24 hours'",
+        "options": {
+          "queryReplacement": "={{ [ $json.external_user_id ] }}"
+        }
+      },
+      "id": "e45b43e2-dbb2-412e-a816-04ebea209872",
+      "name": "Count recent submissions",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c2f38477-a7f3-f0ff-faa5-b46f767f8fae",
+              "leftValue": "={{ Number($json.email_count) < $('Config').first().json.per_email_limit && Number($json.all_count) < $('Config').first().json.day_limit }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0a0a60a0-6a98-4c1e-af87-4040ff5532ea",
+      "name": "Within limits?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Normalize form').all();"
+      },
+      "id": "b7e99e3a-ead8-43ab-a3f6-3b694c837026",
+      "name": "The submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstIngest01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "bb04415a-a918-4838-a3ca-d3ab0b68da39",
+      "name": "Ingest message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":true}",
+        "options": {}
+      },
+      "id": "24294469-edbd-41a9-a388-701472e6b4a4",
+      "name": "Respond: received",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":false,\"error\":\"limit\"}",
+        "options": {
+          "responseCode": 429
+        }
+      },
+      "id": "d506e2e1-947e-4725-a371-9b4e3250cac2",
+      "name": "Respond: limit reached",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":false,\"error\":\"a valid email and a message are required\"}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "04f80de6-42ad-4f45-a13b-95cd1f428ff5",
+      "name": "Respond: bad request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Form submission": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize form": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Count recent submissions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: bad request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count recent submissions": {
+      "main": [
+        [
+          {
+            "node": "Within limits?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within limits?": {
+      "main": [
+        [
+          {
+            "node": "The submission",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: limit reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "The submission": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest message": {
+      "main": [
+        [
+          {
+            "node": "Respond: received",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

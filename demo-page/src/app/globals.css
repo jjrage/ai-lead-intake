@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* Agave Lane Realty: agave green, clay, desert sand. */
+@theme {
+  --color-ink: #1e2a24;
+  --color-ink-soft: #4a5a51;
+  --color-muted: #77847c;
+  --color-line: #e6dccd;
+  --color-sand-50: #fbf8f3;
+  --color-sand-100: #f4eee5;
+  --color-sand-200: #e7ddcf;
+  --color-agave: #2f6b57;
+  --color-agave-dark: #245443;
+  --color-agave-50: #e8f1ec;
+  --color-clay: #b85a35;
+  --color-clay-50: #fbeee7;
+  /* Chart marks: a stronger step of the agave green (passes the chroma floor; dataviz validator). */
+  --color-data: #23855c;
+  --color-grid: #ece4d8;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+body {
+  background: var(--color-sand-100);
+  color: var(--color-ink);
+}

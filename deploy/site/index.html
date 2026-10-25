@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agave Lane Realty — Phoenix, AZ</title>
+<meta name="description" content="Agave Lane Realty is a fictional Phoenix real estate brokerage used to demonstrate an AI lead assistant.">
+<style>
+  :root { --ink: #1f2a2e; --muted: #5b6b70; --accent: #3d7a5c; --bg: #faf8f4; --card: #ffffff; --line: #e6e1d8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; }
+  .tag { color: var(--muted); margin: 0 0 32px; }
+  .notice { background: #fff6e0; border: 1px solid #f0d9a0; border-radius: 10px; padding: 14px 16px; margin: 0 0 32px; }
+  h2 { font-size: 1.15rem; margin: 32px 0 8px; }
+  ul { padding-left: 20px; }
+  a { color: var(--accent); }
+  footer { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; color: var(--muted); font-size: 0.9rem; border-top: 1px solid var(--line); padding-top: 16px; }
+  form { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 14px; }
+  label { display: grid; gap: 4px; font-size: 0.95rem; font-weight: 600; }
+  label span { font-weight: 400; color: var(--muted); }
+  input, textarea { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); width: 100%; }
+  textarea { min-height: 110px; resize: vertical; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+  .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+  button { font: inherit; font-weight: 600; background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 12px 18px; cursor: pointer; justify-self: start; }
+  button:disabled { opacity: 0.6; cursor: default; }
+  #form-status { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Agave Lane Realty</h1>
+  <p class="tag">Residential real estate in the Phoenix area: Phoenix, Scottsdale, Tempe, Mesa, Chandler, Gilbert, Glendale and Peoria.</p>
+
+  <p class="notice"><strong>This is a demo.</strong> Agave Lane Realty is a fictional brokerage, created to demonstrate an AI
+  assistant that answers people who message a business. It does not sell, list or rent real properties, and its agents
+  are not real people. Please don't share sensitive personal information in the chat.</p>
+
+  <h2>What the assistant does</h2>
+  <p>Ava, the virtual assistant, answers messages on the website chat and in messaging apps, day and night. She answers
+  common questions, asks a few questions to understand what you're looking for, and passes the conversation to the team
+  when you ask for a person.</p>
+
+  <h2>Services</h2>
+  <ul>
+    <li>Buying a home</li>
+    <li>Selling a home</li>
+    <li>Rentals</li>
+    <li>Relocation to the Phoenix area and investment properties</li>
+  </ul>
+
+  <h2>Hours</h2>
+  <p>Monday to Friday 9:00–18:00, Saturday 10:00–16:00, closed on Sunday (Arizona time). The assistant replies at any time.</p>
+
+  <h2 id="contact">Contact us</h2>
+  <p>Tell us what you're looking for and we'll reply by email.</p>
+  <form id="contact-form">
+    <div class="row">
+      <label>Name <input name="name" autocomplete="name" maxlength="100"></label>
+      <label>Email <input name="email" type="email" autocomplete="email" required maxlength="200"></label>
+    </div>
+    <label>Phone <span>(optional)</span> <input name="phone" type="tel" autocomplete="tel" maxlength="40"></label>
+    <label>Message <textarea name="message" required maxlength="2000" placeholder="For example: we're relocating to Phoenix in spring and want a 3-bedroom house under $600k."></textarea></label>
+    <label class="hp" aria-hidden="true">Website <input name="website" tabindex="-1" autocomplete="off"></label>
+    <button type="submit">Send</button>
+    <p id="form-status" role="status"></p>
+  </form>
+</main>
+<script>
+  // The form goes to the assistant (n8n workflow "Assistant · Website form"); the reply is prepared by
+  // email for the team to review.
+  const form = document.getElementById('contact-form');
+  const status = document.getElementById('form-status');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = form.querySelector('button');
+    const data = Object.fromEntries(new FormData(form));
+    data.form_id = crypto.randomUUID();
+    button.disabled = true;
+    status.textContent = 'Sending…';
+    try {
+      const res = await fetch('/webhook/form', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { form.reset(); status.textContent = 'Thank you! We will reply to your email soon.'; }
+      else if (res.status === 429) status.textContent = 'We have received several messages from you today. We will reply soon.';
+      else status.textContent = 'Please enter a valid email address and a message.';
+    } catch {
+      status.textContent = 'The message could not be sent. Please try again.';
+    }
+    button.disabled = false;
+  });
+</script>
+<footer>
+  <a href="/privacy">Privacy policy</a> · Agave Lane Realty is a fictional business for demonstration purposes.
+</footer>
+</body>
+</html>

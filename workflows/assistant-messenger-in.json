@@ -1,0 +1,257 @@
+{
+  "id": "LeadAsstFbIn0001",
+  "name": "Assistant · Messenger and Lead Ads in",
+  "description": "Receives Facebook Page messages and Lead Ads form submissions and hands them to Ingest message.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Messenger and Lead Ads\nEvents of the Facebook Page (one webhook per Page in a Meta app). When the workflow is published, the trigger subscribes the Meta app to Page events (`messages`, `messaging_postbacks`, `leadgen`) with this webhook and checks each event's signature with the app secret. The Page itself is subscribed once by `scripts/meta-setup.mjs`.\nA message is turned into the common format and stored by **Ingest message**. A Lead Ads form submission is read in full (**Get lead**) and stored the same way; the assistant's first reply goes to the lead's phone on WhatsApp.",
+        "height": 200,
+        "width": 900,
+        "color": 6
+      },
+      "id": "b81a6797-fe1f-4eba-aca6-54d0eb2d87ed",
+      "name": "Note: messenger",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "appId": "2984455028584012",
+        "object": "page",
+        "fields": [
+          "messages",
+          "messaging_postbacks",
+          "leadgen"
+        ],
+        "options": {}
+      },
+      "id": "0d686806-b096-476d-a485-9654040ee1f0",
+      "name": "Meta Trigger",
+      "type": "n8n-nodes-base.facebookTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "facebookGraphAppApi": {
+          "id": "laCredMetaApp001",
+          "name": "Meta app (webhooks)"
+        }
+      },
+      "webhookId": "abf46e14-f4a1-4bc0-a60b-c0e9a674d1e3"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bc8df96c-807f-4d45-a14f-e7f159063156",
+              "name": "profile",
+              "value": "agave-lane",
+              "type": "string"
+            },
+            {
+              "id": "0a770c31-a61d-4cdb-aeb4-f376f1a9b3f9",
+              "name": "channel",
+              "value": "messenger",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6801ca3d-6a6d-4474-a7fc-dc4288e1b86e",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// A Messenger or Instagram webhook entry becomes the common inbound message. Both use the same\n// format; the person is keyed by their page- or Instagram-scoped id, and neither shares a phone or\n// email. A tapped conversation starter arrives as a postback with the starter's text.\nconst { profile, channel } = $('Config').first().json;\nconst out = [];\nfor (const item of $('Meta Trigger').all()) {\n  for (const e of item.json.messaging ?? []) {\n    const m = e.message;\n    const pb = e.postback;\n    if ((!m && !pb) || m?.is_echo || m?.is_deleted) continue;  // echoes of our own replies, deletions\n    const attachments = (m?.attachments ?? []).filter((a) => a.type !== 'fallback').map((a) => ({ type: a.type === 'file' ? 'file' : a.type, url: a.payload?.url ?? null }));\n    let text = String(m?.text ?? pb?.title ?? '').trim();\n    if (m?.is_unsupported) text = '(sent a message type the assistant cannot read)';\n    if (!text && attachments.length) text = `(sent ${attachments.map((a) => a.type).join(', ')})`;\n    if (!text) continue;\n    out.push({ json: {\n      profile,\n      channel,\n      external_user_id: e.sender.id,\n      external_message_id: m?.mid ?? pb?.mid ?? `${e.sender.id}:${e.timestamp}`,\n      sent_at: new Date(e.timestamp).toISOString(),\n      text,\n      attachments,\n      sender: { display_name: null, username: null, phone: null, email: null },\n      address: { user_id: e.sender.id, account_id: e.recipient.id },\n    } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "359cf25b-cd62-4a48-a6b3-18759570ee87",
+      "name": "Normalize message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "LeadAsstIngest01"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "51090675-6d0c-4ba2-a9e9-5b4ec3a20d79",
+      "name": "Ingest message",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lead Ads: a \"leadgen\" change carries only the lead's id; Get lead reads the answers.\nconst out = [];\nfor (const item of $('Meta Trigger').all()) {\n  for (const c of item.json.changes ?? []) {\n    if (c.field === 'leadgen' && c.value?.leadgen_id) out.push({ json: { leadgen_id: String(c.value.leadgen_id) } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "90fc4c63-a3dc-4189-ad22-60fe483fe6dd",
+      "name": "Lead form submissions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $json.leadgen_id + '?fields=id,created_time,form_id,field_data' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "c92d1db0-a338-4804-ad1d-0834b1254831",
+      "name": "Get lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        200
+      ],
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "laCredMetaPage01",
+          "name": "Facebook Page (Messenger, Instagram)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// A Lead Ads form submission becomes the common inbound message. The answers go into the text for\n// the assistant; the name, phone and email are what the person typed into the form, so Ingest\n// stores them and finds the person again when they reply on WhatsApp.\nconst profile = $('Config').first().json.profile;\nreturn $input.all().map((item) => {\n  const lead = item.json;\n  const answers = Object.fromEntries((lead.field_data ?? []).map((f) => [f.name, (f.values ?? []).join(', ')]));\n  const phone = answers.phone_number ? `+${answers.phone_number.replace(/\\D/g, '')}` : null;\n  const name = answers.full_name?.trim() || null;\n  return { json: {\n    profile,\n    channel: 'lead_ads',\n    external_user_id: String(lead.id),\n    external_message_id: `lead:${lead.id}`,\n    sent_at: new Date(String(lead.created_time).replace(/([+-]\\d\\d)(\\d\\d)$/, '$1:$2')).toISOString(),\n    text: `(sent the lead form on Facebook: ${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('; ')})`,\n    attachments: [],\n    sender: { name, display_name: name, username: null, phone, email: answers.email?.trim() || null },\n    // The first reply goes to this phone on WhatsApp (see Send message).\n    address: { leadgen_id: String(lead.id), form_id: lead.form_id ?? null, phone, first_name: name?.split(/\\s+/)[0] ?? null },\n  } };\n});\n"
+      },
+      "id": "a2fd1e84-a1e3-44a1-affe-1cf23e371d9f",
+      "name": "Normalize lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Meta Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Lead form submissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize message": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead form submissions": {
+      "main": [
+        [
+          {
+            "node": "Get lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get lead": {
+      "main": [
+        [
+          {
+            "node": "Normalize lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize lead": {
+      "main": [
+        [
+          {
+            "node": "Ingest message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

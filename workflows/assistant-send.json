@@ -1,0 +1,1036 @@
+{
+  "id": "LeadAsstSend0001",
+  "name": "Assistant · Send message",
+  "description": "Sends one stored outbound message on its channel.",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Send one message\nSends a stored outbound message (from the AI or a person) on its channel and records the result. Website chat messages are only marked sent: the page fetches them. Email (and replies to the website form) works in draft mode: the reply becomes a Gmail draft in the lead's thread, and Slack tells the team to review and send it. A failed send is recorded and reported in Slack.\nAnswers the lead can tap (`quick_replies` from Reply turn, \"Other\" last) go as buttons: a reply keyboard in Telegram, reply buttons in WhatsApp (three at most: the first two options and \"Other\"), quick replies in Messenger and Instagram.",
+        "height": 220,
+        "width": 1000,
+        "color": 6
+      },
+      "id": "3b3a5e8c-464c-4492-a715-fe38a4d21fa0",
+      "name": "Note: send",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "7c334d02-9a02-48c7-a780-cb541ed46b41",
+      "name": "When called",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id, m.text, m.status, m.channel, m.conversation_id, m.template, i.external_id, i.address,\n       coalesce(i.last_inbound_at > now() - interval '24 hours', false) AS in_window\nFROM assistant.messages m\nJOIN assistant.conversations v ON v.id = m.conversation_id\nJOIN assistant.contacts ct ON ct.id = v.contact_id\nLEFT JOIN assistant.identities i ON i.profile = ct.profile AND i.channel = m.channel AND i.external_id = m.identity_id\nWHERE m.id = $1::bigint",
+        "options": {
+          "queryReplacement": "={{ [ $json.message_id ] }}"
+        }
+      },
+      "id": "a2dd3328-1bfd-4449-a797-d896bd4bec3b",
+      "name": "Load message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3153641a-f32f-59c3-bb0e-6d0fc7cf6cee",
+                    "leftValue": "={{ $json.status !== 'pending' ? 'not pending' : ['messenger', 'instagram'].includes($json.channel) ? 'meta' : ['email', 'web_form'].includes($json.channel) ? 'email' : $json.channel }}",
+                    "rightValue": "telegram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Telegram"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2712ec33-ebf9-bfd6-4395-39465aa50609",
+                    "leftValue": "={{ $json.status !== 'pending' ? 'not pending' : ['messenger', 'instagram'].includes($json.channel) ? 'meta' : ['email', 'web_form'].includes($json.channel) ? 'email' : $json.channel }}",
+                    "rightValue": "whatsapp",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "WhatsApp"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "35d87029-86e6-508d-15dc-f4bc1dd2d5ca",
+                    "leftValue": "={{ $json.status !== 'pending' ? 'not pending' : ['messenger', 'instagram'].includes($json.channel) ? 'meta' : ['email', 'web_form'].includes($json.channel) ? 'email' : $json.channel }}",
+                    "rightValue": "web_chat",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Website chat"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8ad474d6-5055-5bb6-20d6-8778567f7790",
+                    "leftValue": "={{ $json.status !== 'pending' ? 'not pending' : ['messenger', 'instagram'].includes($json.channel) ? 'meta' : ['email', 'web_form'].includes($json.channel) ? 'email' : $json.channel }}",
+                    "rightValue": "not pending",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Already handled"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "5816f3d1-ee06-af89-40e1-28399cf6193f",
+                    "leftValue": "={{ $json.status !== 'pending' ? 'not pending' : ['messenger', 'instagram'].includes($json.channel) ? 'meta' : ['email', 'web_form'].includes($json.channel) ? 'email' : $json.channel }}",
+                    "rightValue": "meta",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Messenger or Instagram"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e242e7e4-f5d4-ba71-6611-6fce18710f15",
+                    "leftValue": "={{ $json.status !== 'pending' ? 'not pending' : ['messenger', 'instagram'].includes($json.channel) ? 'meta' : ['email', 'web_form'].includes($json.channel) ? 'email' : $json.channel }}",
+                    "rightValue": "lead_ads",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Lead form"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8fdb73a9-c0e0-9dd0-8eb3-92f7b8359de0",
+                    "leftValue": "={{ $json.status !== 'pending' ? 'not pending' : ['messenger', 'instagram'].includes($json.channel) ? 'meta' : ['email', 'web_form'].includes($json.channel) ? 'email' : $json.channel }}",
+                    "rightValue": "email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Email (draft)"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Unsupported channel"
+        }
+      },
+      "id": "163cc12c-fff8-4f3f-aa25-f35e3c6c2591",
+      "name": "Channel",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "998f7156-1604-82ae-388b-d8793b53e8da",
+                    "leftValue": "={{ String(($('When called').first().json.quick_replies ?? []).length) }}",
+                    "rightValue": "4",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "4 buttons"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8586eb1d-f30e-caf1-716b-ca6a84bd3c41",
+                    "leftValue": "={{ String(($('When called').first().json.quick_replies ?? []).length) }}",
+                    "rightValue": "3",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "3 buttons"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "No buttons"
+        }
+      },
+      "id": "6f658afa-2cb6-4da7-a38f-e3bc6e01cbd3",
+      "name": "Buttons",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        660,
+        -250
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.address.chat_id }}",
+        "text": "={{ $json.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "replyMarkup": "replyKeyboard",
+        "replyKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ ($('When called').first().json.quick_replies ?? [])[0] }}",
+                    "additionalFields": {}
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ ($('When called').first().json.quick_replies ?? [])[1] }}",
+                    "additionalFields": {}
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ ($('When called').first().json.quick_replies ?? [])[2] }}",
+                    "additionalFields": {}
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ ($('When called').first().json.quick_replies ?? [])[3] }}",
+                    "additionalFields": {}
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "replyKeyboardOptions": {
+          "resize_keyboard": true,
+          "one_time_keyboard": true
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "33515120-ae93-460b-abef-24bc91d1a93f",
+      "name": "Telegram: send with 4 buttons",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        -450
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "laCredTelegram01",
+          "name": "Telegram bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.address.chat_id }}",
+        "text": "={{ $json.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "replyMarkup": "replyKeyboard",
+        "replyKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ ($('When called').first().json.quick_replies ?? [])[0] }}",
+                    "additionalFields": {}
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ ($('When called').first().json.quick_replies ?? [])[1] }}",
+                    "additionalFields": {}
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ ($('When called').first().json.quick_replies ?? [])[2] }}",
+                    "additionalFields": {}
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "replyKeyboardOptions": {
+          "resize_keyboard": true,
+          "one_time_keyboard": true
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "7ac5aab6-191b-4a6c-aad4-9bc00bcc484a",
+      "name": "Telegram: send with 3 buttons",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        -300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "laCredTelegram01",
+          "name": "Telegram bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.address.chat_id }}",
+        "text": "={{ $json.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "replyMarkup": "replyKeyboardRemove",
+        "replyKeyboardRemove": {
+          "remove_keyboard": true
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "52804ad7-30dc-4633-aa1d-ff343b1e332c",
+      "name": "Telegram: send",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        -150
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "laCredTelegram01",
+          "name": "Telegram bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $json.address.phone_number_id + '/messages' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ !$json.in_window && $json.template ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: $json.address.to || undefined, recipient: $json.address.to ? undefined : $json.address.user_id, type: 'template', template: { name: $json.template.name, language: { code: 'en_US' }, components: [ { type: 'body', parameters: $json.template.params.map((p) => ({ type: 'text', text: String(p).replace(/\\s+/g, ' ') })) } ] } } : ($('When called').first().json.quick_replies ?? []).length > 1 && $json.text.length <= 1024 ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: $json.address.to || undefined, recipient: $json.address.to ? undefined : $json.address.user_id, type: 'interactive', interactive: { type: 'button', body: { text: $json.text }, action: { buttons: ($('When called').first().json.quick_replies ?? []).filter((title, i, all) => all.length <= 3 || i !== 2).map((title, i) => ({ type: 'reply', reply: { id: 'qr-' + (i + 1), title } })) } } } : { messaging_product: 'whatsapp', recipient_type: 'individual', to: $json.address.to || undefined, recipient: $json.address.to ? undefined : $json.address.user_id, type: 'text', text: { body: $json.text, preview_url: false } } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "95aca727-74ba-4dd3-a1b7-79766668abfb",
+      "name": "WhatsApp: send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "laCredWhatsApp01",
+          "name": "WhatsApp Cloud API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v25.0/me/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { recipient: { id: $json.address.user_id }, messaging_type: !$json.in_window && $json.template ? 'MESSAGE_TAG' : 'RESPONSE', tag: !$json.in_window && $json.template ? 'CONFIRMED_EVENT_UPDATE' : undefined, message: ($('When called').first().json.quick_replies ?? []).length > 1 ? { text: $json.text, quick_replies: ($('When called').first().json.quick_replies ?? []).map((title, i) => ({ content_type: 'text', title, payload: 'qr-' + (i + 1) })) } : { text: $json.text } } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "28303789-d257-4697-a4a8-b935c9cb1f46",
+      "name": "Messenger or Instagram: send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        150
+      ],
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "laCredMetaPage01",
+          "name": "Facebook Page (Messenger, Instagram)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v25.0/1305551812651974/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.template ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: $json.address.phone, type: 'template', template: { name: $json.template.name, language: { code: 'en_US' }, components: [ { type: 'body', parameters: $json.template.params.map((p) => ({ type: 'text', text: String(p).replace(/\\s+/g, ' ') })) } ] } } : { messaging_product: 'whatsapp', recipient_type: 'individual', to: $json.address.phone, type: 'template', template: { name: 'lead_form_followup', language: { code: 'en_US' }, components: [ { type: 'body', parameters: [ $json.address.first_name || 'there', $json.text ].map((p) => ({ type: 'text', text: String(p).replace(/\\s+/g, ' ') })) } ] } } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "77f23706-7105-47ed-a1eb-af26d7000681",
+      "name": "Lead form: WhatsApp template",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        300
+      ],
+      "credentials": {
+        "whatsAppApi": {
+          "id": "laCredWhatsApp01",
+          "name": "WhatsApp Cloud API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $json.address.subject ? 'Re: ' + $json.address.subject : 'Your request to Agave Lane Realty' }}",
+        "emailType": "text",
+        "message": "={{ $json.text }}",
+        "options": {
+          "sendTo": "={{ $json.address.email }}",
+          "threadId": "={{ $json.address.thread_id || '' }}"
+        }
+      },
+      "id": "a0dd7557-7170-46a4-ab4e-f311c1da5924",
+      "name": "Email: Gmail draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        450
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "liCredGmail00001",
+          "name": "Gmail (agency inbox)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.messages SET status = 'drafted', provider_id = nullif($2, ''), sent_at = now(), error = NULL WHERE id = $1::bigint RETURNING id, conversation_id, channel",
+        "options": {
+          "queryReplacement": "={{ [ $('Load message').first().json.id, String($json.id ?? '') ] }}"
+        }
+      },
+      "id": "d85822e6-a58c-4184-a557-c1ec9825ffbf",
+      "name": "Mark drafted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        450
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { channel: 'C0CCMJZMVSL', text: '✉️ Ava drafted a reply to ' + $('Load message').first().json.address.email + ' (conversation #' + $json.conversation_id + '). Review and send it in Gmail: Drafts.' } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "882cc4d8-3747-4ed2-a76c-8948d6a260d1",
+      "name": "Slack: draft ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        450
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH m AS (\n  UPDATE assistant.messages SET status = 'sent', provider_id = nullif($2, ''), sent_at = now(), error = NULL, quick_replies = $3::jsonb\n  WHERE id = $1::bigint RETURNING conversation_id\n)\nUPDATE assistant.conversations SET last_outbound_at = now(), updated_at = now()\nWHERE id = (SELECT conversation_id FROM m) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('Load message').first().json.id, String($json.message_id ?? $json.result?.message_id ?? $json.messages?.[0]?.id ?? ''), JSON.stringify(($('When called').first().json.quick_replies ?? [])) ] }}"
+        }
+      },
+      "id": "06534fe6-366e-42b4-afc6-b86885c03a95",
+      "name": "Mark sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -150
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE assistant.messages SET status = 'failed', error = $2 WHERE id = $1::bigint RETURNING id, conversation_id, channel, error",
+        "options": {
+          "queryReplacement": "={{ [ $('Load message').first().json.id, String(typeof $json.error === 'string' ? $json.error : ($json.error?.description || $json.error?.message || 'no sender for channel ' + $('Load message').first().json.channel)).slice(0, 1000) ] }}"
+        }
+      },
+      "id": "dae87b95-4da6-406d-ad08-64bd7c4c3092",
+      "name": "Mark failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "liCredPostgres01",
+          "name": "Lead Intake Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { channel: 'C0CCMJZMVSL', text: '⚠️ A reply in conversation #' + $json.conversation_id + ' (' + $json.channel + ') was not sent: ' + $json.error } }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "31afe37d-136d-4697-a2ed-9626d5456381",
+      "name": "Slack: not sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        100
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "liCredSlack00001",
+          "name": "Slack bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {},
+      "id": "b962db7f-bf5a-4db9-aaa3-f7c8150a95ac",
+      "name": "Already handled: skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        660,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "When called": {
+      "main": [
+        [
+          {
+            "node": "Load message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load message": {
+      "main": [
+        [
+          {
+            "node": "Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Channel": {
+      "main": [
+        [
+          {
+            "node": "Buttons",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WhatsApp: send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already handled: skip",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Messenger or Instagram: send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lead form: WhatsApp template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email: Gmail draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Messenger or Instagram: send": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead form: WhatsApp template": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email: Gmail draft": {
+      "main": [
+        [
+          {
+            "node": "Mark drafted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark drafted": {
+      "main": [
+        [
+          {
+            "node": "Slack: draft ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buttons": {
+      "main": [
+        [
+          {
+            "node": "Telegram: send with 4 buttons",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: send with 3 buttons",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: send with 4 buttons": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: send with 3 buttons": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: send": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp: send": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark failed": {
+      "main": [
+        [
+          {
+            "node": "Slack: not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "LeadAsstErrs0001",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}
